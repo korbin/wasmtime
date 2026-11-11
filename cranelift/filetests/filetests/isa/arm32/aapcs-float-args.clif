@@ -1,0 +1,99 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+;; AAPCS-VFP: `a` in s0, `b` in s1 (modeled as the shadow register d8),
+;; `c` in d1 (s2-s3) and `d` in s4.
+function %callee(f32, f32, f64, f32) -> f32 {
+block0(v0: f32, v1: f32, v2: f64, v3: f32):
+    v4 = fadd v0, v1
+    v5 = fadd v4, v3
+    return v5
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d8}
+; block0:
+;   vadd.f32 s10, s0, s16
+;   vadd.f32 s0, s10, s4
+;   vpop {d8-d8}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8}
+; block1: ; offset 0xc
+;   vmov.f32 s16, s1
+;   vadd.f32 s10, s0, s16
+;   vadd.f32 s0, s10, s4
+;   vpop {d8}
+;   pop {fp, pc}
+
+;; `a` in s0, `b` in d1, `c` back-fills s1.
+function %backfill(f32, f64, f32) -> f32 {
+block0(v0: f32, v1: f64, v2: f32):
+    v3 = fadd v0, v2
+    return v3
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d8}
+; block0:
+;   vadd.f32 s0, s0, s16
+;   vpop {d8-d8}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8}
+; block1: ; offset 0xc
+;   vmov.f32 s16, s1
+;   vadd.f32 s0, s0, s16
+;   vpop {d8}
+;   pop {fp, pc}
+
+function %caller(f32, f32) -> f32 {
+    fn0 = %callee(f32, f32, f64, f32) -> f32
+block0(v0: f32, v1: f32):
+    v2 = f64const 0x1.0
+    v3 = call fn0(v0, v1, v2, v1)
+    return v3
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d8}
+; block0:
+;   vmov.f64 d1, #1.0
+;   ldr r0, =%callee+0
+;   vmov.f64 d2, d8
+;   blx r0
+;   vpop {d8-d8}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8}
+; block1: ; offset 0xc
+;   vmov.f32 s16, s1
+;   vmov.f64 d1, #1.000000e+00
+;   ldr r0, [pc]
+;   b #0x20
+;   andeq r0, r0, r0 ; reloc_external Abs4 %callee 0
+;   vmov.f64 d2, d8
+;   vmov.f32 s1, s16
+;   blx r0
+;   vpop {d8}
+;   pop {fp, pc}
+

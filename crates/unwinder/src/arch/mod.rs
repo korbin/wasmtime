@@ -24,6 +24,10 @@ cfg_select! {
         mod riscv64;
         use riscv64 as imp;
     }
+    target_arch = "arm" => {
+        mod arm;
+        use arm as imp;
+    }
     _ => {}
 }
 
@@ -36,6 +40,7 @@ cfg_select! {
         target_arch = "aarch64",
         target_arch = "s390x",
         target_arch = "riscv64",
+        target_arch = "arm",
     ) => {
         /// Get the current stack pointer (at the time this function is
         /// executing). This may be used to check, e.g., approximate space
@@ -69,11 +74,7 @@ cfg_select! {
             ///
             /// - The Cranelift-generated `try_call` that we're unwinding to was
             ///   invoking the callee with the `tail` calling convention.
-            pub unsafe fn resume_tailcc(
-                &self,
-                payload1: usize,
-                payload2: usize,
-            ) -> ! {
+            pub unsafe fn resume_tailcc(&self, payload1: usize, payload2: usize) -> ! {
                 // Without this ASAN seems to nondeterministically trigger an
                 // internal assertion when running tests with threads. Not entirely
                 // clear what's going on here but it seems related to the fact that
@@ -135,9 +136,7 @@ cfg_select! {
                 NEXT_OLDER_SP_FROM_FP_OFFSET
             }
             unsafe fn get_next_older_pc_from_fp(&self, fp: usize) -> usize {
-                unsafe {
-                    get_next_older_pc_from_fp(fp)
-                }
+                unsafe { get_next_older_pc_from_fp(fp) }
             }
             fn assert_fp_is_aligned(&self, fp: usize) {
                 assert_fp_is_aligned(fp)

@@ -10,6 +10,9 @@ use target_lexicon::Triple;
 #[cfg(all(target_arch = "riscv64", target_os = "linux"))]
 mod riscv;
 
+#[cfg(all(target_arch = "arm", any(target_os = "linux", target_os = "android")))]
+mod arm;
+
 #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 mod macos;
 
@@ -190,6 +193,11 @@ pub fn infer_native_flags(isa_builder: &mut dyn Configurable) -> Result<(), &'st
         // Ignore errors for cpuinfo. QEMU versions prior to 8.1 do not emulate
         // the cpuinfo interface, so we can't rely on it being present for now.
         let _ = riscv::cpuinfo_detect(isa_builder);
+    }
+
+    #[cfg(all(target_arch = "arm", any(target_os = "linux", target_os = "android")))]
+    {
+        arm::hwcap_detect(isa_builder)?;
     }
 
     // On all other architectures (e.g. wasm32) we won't infer any native flags,

@@ -593,6 +593,22 @@ pub trait ABIMachineSpec {
     /// Get the ABI-dependent MachineEnv for managing register allocation.
     fn get_machine_env(flags: &settings::Flags, call_conv: isa::CallConv) -> &MachineEnv;
 
+    /// Get the MachineEnv for a function whose virtual registers use only
+    /// the register classes marked in `vreg_classes` (indexed by `RegClass as
+    /// usize`).
+    ///
+    /// This lets a backend whose register classes alias each other in
+    /// hardware hand more registers to one class in functions that don't use
+    /// the other. Defaults to `get_machine_env`.
+    fn get_machine_env_for_vreg_classes<'a>(
+        flags: &'a settings::Flags,
+        _isa_flags: &'a Self::F,
+        call_conv: isa::CallConv,
+        _vreg_classes: [bool; 3],
+    ) -> &'a MachineEnv {
+        Self::get_machine_env(flags, call_conv)
+    }
+
     /// Get all caller-save registers, that is, registers that we expect
     /// not to be saved across a call to a callee with the given ABI.
     fn get_regs_clobbered_by_call(
@@ -1188,6 +1204,9 @@ pub struct Callee<M: ABIMachineSpec> {
     flags: settings::Flags,
     /// The ISA-specific flag values controlling this function's compilation.
     isa_flags: M::F,
+    /// The register classes used by this function's virtual registers
+    /// (indexed by `RegClass as usize`); all of them until lowering is done.
+    vreg_classes: [bool; 3],
     /// If this function has a stack limit specified, then `Reg` is where the
     /// stack limit will be located after the instructions specified have been
     /// executed.
@@ -1371,6 +1390,7 @@ impl<M: ABIMachineSpec> Callee<M> {
             call_conv,
             flags,
             isa_flags: isa_flags.clone(),
+            vreg_classes: [true; 3],
             stack_limit,
             _mach: PhantomData,
         })
@@ -1590,7 +1610,18 @@ impl<M: ABIMachineSpec> Callee<M> {
 
     /// Get the ABI-dependent MachineEnv for managing register allocation.
     pub fn machine_env(&self) -> &MachineEnv {
-        M::get_machine_env(&self.flags, self.call_conv)
+        M::get_machine_env_for_vreg_classes(
+            &self.flags,
+            &self.isa_flags,
+            self.call_conv,
+            self.vreg_classes,
+        )
+    }
+
+    /// Record the register classes used by the function's virtual registers
+    /// once lowering is done, which may select a different `MachineEnv`.
+    pub fn set_vreg_classes(&mut self, vreg_classes: [bool; 3]) {
+        self.vreg_classes = vreg_classes;
     }
 
     /// The offsets of all sized stack slots (not spill slots) for debuginfo purposes.

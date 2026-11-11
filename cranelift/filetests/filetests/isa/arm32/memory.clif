@@ -1,0 +1,418 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+function %load_i32(i32) -> i32 {
+block0(v0: i32):
+    v1 = load.i32 v0+8
+    return v1
+}
+
+; VCode:
+; block0:
+;   ldr r0, [r0, #8]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ldr r0, [r0, #8] ; trap: heap_oob
+;   bx lr
+
+function %load_large_offset(i32) -> i32 {
+block0(v0: i32):
+    v1 = load.i32 v0+0x12345
+    return v1
+}
+
+; VCode:
+; block0:
+;   ldr r0, [r0, #74565]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add ip, r0, #0x12000
+;   ldr r0, [ip, #0x345] ; trap: heap_oob
+;   bx lr
+
+function %sload16(i32) -> i32 {
+block0(v0: i32):
+    v1 = sload16.i32 v0-2
+    return v1
+}
+
+; VCode:
+; block0:
+;   ldrsh r0, [r0, #-2]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ldrsh r0, [r0, #-2] ; trap: heap_oob
+;   bx lr
+
+function %store_i64(i32, i64) {
+block0(v0: i32, v1: i64):
+    store v1, v0+4
+    return
+}
+
+; VCode:
+; block0:
+;   str r3, [r0, #8]
+;   str r2, [r0, #4]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   str r3, [r0, #8] ; trap: heap_oob
+;   str r2, [r0, #4] ; trap: heap_oob
+;   bx lr
+
+function %load_f64_unaligned(i32) -> f64 {
+block0(v0: i32):
+    v1 = load.f64 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   ldr r2, [r0]
+;   ldr r0, [r0, #4]
+;   vmov d0, r2, r0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ldr r2, [r0] ; trap: heap_oob
+;   ldr r0, [r0, #4] ; trap: heap_oob
+;   vmov d0, r2, r0
+;   bx lr
+
+function %load_f64_aligned(i32) -> f64 {
+block0(v0: i32):
+    v1 = load.f64 aligned v0+16
+    return v1
+}
+
+; VCode:
+; block0:
+;   vldr d0, [r0, #16]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d0, [r0, #0x10] ; trap: heap_oob
+;   bx lr
+
+function %stack_slot() -> i32 {
+    ss0 = explicit_slot 64
+block0:
+    v0 = iconst.i32 7
+    v2 = stack_addr.i32 ss0
+    store v0, v2+60
+    v1 = load.i32 v2+60
+    return v1
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   sub sp, sp, #64
+; block0:
+;   mov r2, #7
+;   load_addr r3, [sp]
+;   str r2, [r3, #60]
+;   ldr r0, [r3, #60]
+;   mov sp, fp
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   sub sp, sp, #0x40
+; block1: ; offset 0xc
+;   mov r2, #7
+;   mov r3, sp
+;   str r2, [r3, #0x3c] ; trap: heap_oob
+;   ldr r0, [r3, #0x3c] ; trap: heap_oob
+;   mov sp, fp
+;   pop {fp, pc}
+
+function %atomic_rmw_add(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = atomic_rmw.i32 add v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r7, fp, lr}
+;   add fp, sp, #4
+; block0:
+;   mov r2, r0
+;   mov r7, r1
+;   atomic_rmw_loop_Add_4 r3, [r2], r7, tmps=r1, r0
+;   mov r0, r3
+;   pop {r7, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r7, fp, lr}
+;   add fp, sp, #4
+; block1: ; offset 0x8
+;   mov r2, r0
+;   mov r7, r1
+;   dmb ish
+;   ldrex r3, [r2] ; trap: heap_oob
+;   add r1, r3, r7
+;   strex r0, r1, [r2] ; trap: heap_oob
+;   cmp r0, #0
+;   bne #0x14
+;   dmb ish
+;   mov r0, r3
+;   pop {r7, fp, pc}
+
+function %atomic_cas_i64(i32, i64, i64) -> i64 {
+block0(v0: i32, v1: i64, v2: i64):
+    v3 = atomic_cas.i64 v0, v1, v2
+    return v3
+}
+
+; VCode:
+;   push {r4, r5, r6, r7, fp, lr}
+;   add fp, sp, #16
+; block0:
+;   ldr r4, [sp, #24]
+;   ldr r5, [sp, #28]
+;   mov r7, r0
+;   atomic_cas_loop64 r0:r1, [r7], r2:r3, r4:r5
+;   pop {r4, r5, r6, r7, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, r5, r6, r7, fp, lr}
+;   add fp, sp, #0x10
+; block1: ; offset 0x8
+;   ldr r4, [sp, #0x18]
+;   ldr r5, [sp, #0x1c]
+;   mov r7, r0
+;   dmb ish
+;   ldrexd r0, r1, [r7] ; trap: heap_oob
+;   cmp r1, r3
+;   cmpeq r0, r2
+;   bne #0x34
+;   strexd r6, r4, r5, [r7] ; trap: heap_oob
+;   cmp r6, #0
+;   bne #0x18
+;   dmb ish
+;   pop {r4, r5, r6, r7, fp, pc}
+
+;; A Spectre-guarded heap address with a constant offset: the offset is folded
+;; into the access, and the guard selects `-k` instead of zero.
+function %guarded_load_offset(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = icmp ugt v1, v2
+    v4 = iadd v0, v1
+    v5 = iconst.i32 20
+    v6 = iadd v4, v5
+    v7 = iconst.i32 0
+    v8 = select_spectre_guard v3, v7, v6
+    v9 = load.i32 little v8
+    return v9
+}
+
+; VCode:
+; block0:
+;   add r0, r0, r1
+;   cmp r1, r2
+;   csel r0, ~#19, r0, hi
+;   ldr r0, [r0, #20]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, r1
+;   cmp r1, r2
+;   mvnhi r0, #0x13
+;   ldr r0, [r0, #0x14] ; trap: heap_oob
+;   bx lr
+
+function %guarded_load_i64_offset(i32, i32, i32) -> i64 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = icmp ugt v1, v2
+    v4 = iadd v0, v1
+    v5 = iconst.i32 8
+    v6 = iadd v4, v5
+    v7 = iconst.i32 0
+    v8 = select_spectre_guard v3, v7, v6
+    v9 = load.i64 little v8
+    return v9
+}
+
+; VCode:
+; block0:
+;   add r0, r0, r1
+;   cmp r1, r2
+;   csel r0, ~#7, r0, hi
+;   ldr r2, [r0, #8]
+;   ldr r1, [r0, #12]
+;   mov r0, r2
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, r1
+;   cmp r1, r2
+;   mvnhi r0, #7
+;   ldr r2, [r0, #8] ; trap: heap_oob
+;   ldr r1, [r0, #0xc] ; trap: heap_oob
+;   mov r0, r2
+;   bx lr
+
+function %guarded_store_f64_offset(i32, i32, i32, f64) {
+block0(v0: i32, v1: i32, v2: i32, v3: f64):
+    v4 = icmp uge v1, v2
+    v5 = iadd v0, v1
+    v6 = iconst.i32 248
+    v7 = iadd v5, v6
+    v8 = iconst.i32 0
+    v9 = select_spectre_guard v4, v8, v7
+    store.f64 little v3, v9
+    return
+}
+
+; VCode:
+; block0:
+;   add r0, r0, r1
+;   cmp r1, r2
+;   csel r0, ~#247, r0, hs
+;   vmov r1, r2, d0
+;   str r2, [r0, #252]
+;   str r1, [r0, #248]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, r1
+;   cmp r1, r2
+;   mvnhs r0, #0xf7
+;   vmov r1, r2, d0
+;   str r2, [r0, #0xfc] ; trap: heap_oob
+;   str r1, [r0, #0xf8] ; trap: heap_oob
+;   bx lr
+
+;; The combined offset is too large for `ldrh`; keep the explicit add.
+function %guarded_load16_large_offset(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = icmp ugt v1, v2
+    v4 = iadd v0, v1
+    v5 = iconst.i32 300
+    v6 = iadd v4, v5
+    v7 = iconst.i32 0
+    v8 = select_spectre_guard v3, v7, v6
+    v9 = uload16.i32 little v8
+    return v9
+}
+
+; VCode:
+; block0:
+;   add r0, r0, r1
+;   add r0, r0, #300
+;   cmp r1, r2
+;   csel r0, #0, r0, hi
+;   ldrh r0, [r0]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, r1
+;   add r0, r0, #0x12c
+;   cmp r1, r2
+;   movhi r0, #0
+;   ldrh r0, [r0] ; trap: heap_oob
+;   bx lr
+
+;; Two guarded accesses at different offsets from the same `base + index`:
+;; each recomputes the sum instead of copying it, so it is never needed on
+;; its own.
+function %guarded_shared_base(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = icmp ugt v1, v2
+    v4 = iadd v0, v1
+    v5 = iconst.i32 16
+    v6 = iadd v4, v5
+    v7 = iconst.i32 0
+    v8 = select_spectre_guard v3, v7, v6
+    v9 = load.i32 little v8
+    v10 = iconst.i32 20
+    v11 = iadd v4, v10
+    v12 = select_spectre_guard v3, v7, v11
+    v13 = load.i32 little v12
+    v14 = iadd v9, v13
+    return v14
+}
+
+; VCode:
+; block0:
+;   add r3, r0, r1
+;   cmp r1, r2
+;   csel r3, ~#15, r3, hi
+;   ldr r3, [r3, #16]
+;   add r0, r0, r1
+;   cmp r1, r2
+;   csel r0, ~#19, r0, hi
+;   ldr r0, [r0, #20]
+;   add r0, r3, r0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r3, r0, r1
+;   cmp r1, r2
+;   mvnhi r3, #0xf
+;   ldr r3, [r3, #0x10] ; trap: heap_oob
+;   add r0, r0, r1
+;   mvnhi r0, #0x13
+;   ldr r0, [r0, #0x14] ; trap: heap_oob
+;   add r0, r3, r0
+;   bx lr
+
+;; A guarded address used by both a load and a store is computed once.
+function %guarded_rmw(i32, i32, i32) {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = icmp ugt v1, v2
+    v4 = iadd v0, v1
+    v5 = iconst.i32 16
+    v6 = iadd v4, v5
+    v7 = iconst.i32 0
+    v8 = select_spectre_guard v3, v7, v6
+    v9 = load.i32 little v8
+    v10 = iconst.i32 1
+    v11 = iadd v9, v10
+    store little v11, v8
+    return
+}
+
+; VCode:
+; block0:
+;   add r0, r0, r1
+;   add r0, r0, #16
+;   cmp r1, r2
+;   csel r0, #0, r0, hi
+;   ldr r1, [r0]
+;   add r1, r1, #1
+;   str r1, [r0]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, r1
+;   add r0, r0, #0x10
+;   cmp r1, r2
+;   movhi r0, #0
+;   ldr r1, [r0] ; trap: heap_oob
+;   add r1, r1, #1
+;   str r1, [r0] ; trap: heap_oob
+;   bx lr
+

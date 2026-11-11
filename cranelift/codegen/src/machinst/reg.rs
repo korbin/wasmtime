@@ -411,6 +411,13 @@ pub trait OperandVisitor {
 
     fn debug_assert_is_allocatable_preg(&self, _reg: PReg, _expected: bool) {}
 
+    /// Whether all allocatable registers of `class` have hardware encodings
+    /// below `limit`, so that an `OperandConstraint::Limit(limit)` would not
+    /// restrict the allocation. Conservatively false by default.
+    fn limit_is_trivial(&self, _class: RegClass, _limit: usize) -> bool {
+        false
+    }
+
     /// Add a register clobber set. This is a set of registers that
     /// are written by the instruction, so must be reserved (not used)
     /// for the whole instruction, but are not used afterward.
@@ -497,6 +504,21 @@ pub trait OperandVisitorImpl: OperandVisitor {
         }
     }
 
+    /// Add an operand that must be allocated to a register whose hardware
+    /// encoding is below `limit` (a power of two). The constraint is only
+    /// passed to the register allocator if it restricts anything, as not all
+    /// allocators support it.
+    fn reg_limited(&mut self, reg: &mut Reg, limit: usize, kind: OperandKind, pos: OperandPos) {
+        if let Some(rreg) = reg.to_real_reg() {
+            debug_assert!(usize::from(rreg.hw_enc()) < limit);
+            self.reg_fixed_nonallocatable(rreg.into());
+        } else if self.limit_is_trivial(reg.class(), limit) {
+            self.add_operand(reg, OperandConstraint::Reg, kind, pos);
+        } else {
+            self.add_operand(reg, OperandConstraint::Limit(limit), kind, pos);
+        }
+    }
+
     /// Add a register def that reuses an earlier use-operand's
     /// allocation. The index of that earlier operand (relative to the
     /// current instruction's start of operands) must be known.
@@ -570,6 +592,12 @@ impl<'a, F: Fn(VReg) -> VReg> OperandVisitor for OperandCollector<'a, F> {
 
     fn reg_clobbers(&mut self, regs: PRegSet) {
         self.clobbers.union_from(regs);
+    }
+
+    fn limit_is_trivial(&self, class: RegClass, limit: usize) -> bool {
+        self.allocatable
+            .into_iter()
+            .all(|preg| preg.class() != class || preg.hw_enc() < limit)
     }
 }
 

@@ -153,11 +153,11 @@ pub use send_sync_unsafe_cell::SendSyncUnsafeCell;
 
 cfg_select! {
     has_virtual_memory => {
-        pub use crate::runtime::vm::byte_count::*;
-        pub use crate::runtime::vm::mmap::{Mmap, MmapOffset};
-        pub use self::cow::{MemoryImage, ModuleMemoryImages};
         #[cfg(feature = "pooling-allocator")]
         pub use self::cow::MemoryImageSlot;
+        pub use self::cow::{MemoryImage, ModuleMemoryImages};
+        pub use crate::runtime::vm::byte_count::*;
+        pub use crate::runtime::vm::mmap::{Mmap, MmapOffset};
     }
     _ => {
         pub use self::cow_disabled::{MemoryImage, ModuleMemoryImages};

@@ -1,0 +1,79 @@
+; The core callee-saved registers are pushed together with the frame record:
+; `push {r4-r7, fp, lr} ; add fp, sp, #16`. The CFA is SP-relative (offset 24)
+; until FP is set up, then FP-relative (offset 8).
+test unwind
+set unwind_info=true
+set preserve_frame_pointers=true
+target armv7
+
+function %f(i32) -> i32 {
+    fn0 = %g()
+block0(v0: i32):
+    v1 = load.i32 v0
+    v2 = load.i32 v0+4
+    v3 = load.i32 v0+8
+    call fn0()
+    v4 = iadd v1, v2
+    v5 = iadd v4, v3
+    return v5
+}
+
+; check: 0x00000010: FDE
+; nextln:         length: 0x00000024
+; nextln:    CIE_pointer: 0x00000000
+; nextln:     start_addr: 0x0000000000000000
+; nextln:     range_size: 0x0000000000000030 (end_addr = 0x0000000000000030)
+; nextln:   Instructions:
+; nextln:                 DW_CFA_advance_loc (1)
+; nextln:                 DW_CFA_def_cfa_offset (8)
+; nextln:                 DW_CFA_offset (r11, 2)
+; nextln:                 DW_CFA_offset (r14, 1)
+; nextln:                 DW_CFA_def_cfa_offset (24)
+; nextln:                 DW_CFA_advance_loc (1)
+; nextln:                 DW_CFA_def_cfa (r11, 8)
+; nextln:                 DW_CFA_offset (r4, 6)
+; nextln:                 DW_CFA_offset (r7, 5)
+; nextln:                 DW_CFA_offset (r8, 4)
+; nextln:                 DW_CFA_offset (r9, 3)
+
+; With an odd number of core callee-saved registers (and calls or stack slots,
+; which need SP 8-byte aligned), 4 bytes of padding below them are allocated
+; with the stack slots: `push {r6-r10, fp, lr} ; add fp, sp, #20 ; sub sp, sp, #12`.
+function %g5(i32) -> i32 tail {
+    ss0 = explicit_slot 8
+    sig0 = () tail
+    fn0 = %h sig0
+block0(v0: i32):
+    v1 = load.i32 v0
+    v2 = load.i32 v0+4
+    v3 = load.i32 v0+8
+    v4 = load.i32 v0+12
+    v5 = load.i32 v0+16
+    v10 = stack_addr.i32 ss0
+    store v1, v10
+    call fn0()
+    v6 = iadd v1, v2
+    v7 = iadd v6, v3
+    v8 = iadd v7, v4
+    v9 = iadd v8, v5
+    return v9
+}
+
+; check: FDE
+; nextln:         length: 0x00000024
+; nextln:    CIE_pointer: 0x00000000
+; nextln:     start_addr: 0x0000000000000000
+; nextln:     range_size: 0x0000000000000050 (end_addr = 0x0000000000000050)
+; nextln:   Instructions:
+; nextln:                 DW_CFA_advance_loc (1)
+; nextln:                 DW_CFA_def_cfa_offset (8)
+; nextln:                 DW_CFA_offset (r11, 2)
+; nextln:                 DW_CFA_offset (r14, 1)
+; nextln:                 DW_CFA_def_cfa_offset (28)
+; nextln:                 DW_CFA_advance_loc (1)
+; nextln:                 DW_CFA_def_cfa (r11, 8)
+; nextln:                 DW_CFA_offset (r6, 7)
+; nextln:                 DW_CFA_offset (r7, 6)
+; nextln:                 DW_CFA_offset (r8, 5)
+; nextln:                 DW_CFA_offset (r9, 4)
+; nextln:                 DW_CFA_offset (r10, 3)

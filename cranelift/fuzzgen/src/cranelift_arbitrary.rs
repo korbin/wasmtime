@@ -122,6 +122,15 @@ impl<'a> CraneliftArbitrary for &mut Unstructured<'a> {
             sig.returns.push(self.abi_param(simd_enabled)?);
         }
 
+        // 32-bit ARM can't hold 128-bit integers.
+        if matches!(architecture, Architecture::Arm(_)) {
+            for param in sig.params.iter_mut().chain(sig.returns.iter_mut()) {
+                if param.value_type == I128 {
+                    param.value_type = I64;
+                }
+            }
+        }
+
         Ok(sig)
     }
 

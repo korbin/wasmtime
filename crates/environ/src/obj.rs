@@ -25,6 +25,14 @@ pub const EF_WASMTIME_PULLEY32: object::elf::FileFlags = object::elf::FileFlags(
 /// pulley64
 pub const EF_WASMTIME_PULLEY64: object::elf::FileFlags = object::elf::FileFlags(1 << 3);
 
+/// Flag for the `e_flags` field in the ELF header indicating compiled code for
+/// 32-bit ARM (A32).
+///
+/// Wasmtime artifacts are always 64-bit ELF files, which cannot describe a
+/// 32-bit ARM `e_machine`, so such artifacts use the AArch64 machine with
+/// this flag.
+pub const EF_WASMTIME_ARM32: object::elf::FileFlags = object::elf::FileFlags(1 << 4);
+
 /// Flag for the `sh_flags` field in the ELF text section that indicates that
 /// the text section does not itself need to be executable. This is used for the
 /// Pulley target, for example, to indicate that it does not need to be made

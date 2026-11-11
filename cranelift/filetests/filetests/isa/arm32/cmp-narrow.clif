@@ -1,0 +1,223 @@
+test compile precise-output
+set unwind_info=false
+set opt_level=speed
+target armv7
+
+;; 8- and 16-bit comparisons against constants use immediates, extended like
+;; the other operand.
+
+function %i8_eq_zero(i8) -> i8 {
+block0(v0: i8):
+    v9 = iconst.i8 0
+    v1 = icmp eq v0, v9
+    return v1
+}
+
+; VCode:
+; block0:
+;   tst r0, #255
+;   cset r0, eq
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   tst r0, #0xff
+;   mov r0, #0
+;   moveq r0, #1
+;   bx lr
+
+function %i16_ne_zero(i16) -> i8 {
+block0(v0: i16):
+    v9 = iconst.i16 0
+    v1 = icmp ne v0, v9
+    return v1
+}
+
+; VCode:
+; block0:
+;   lsls r2, r0, #16
+;   cset r0, ne
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   lsls r2, r0, #0x10
+;   mov r0, #0
+;   movne r0, #1
+;   bx lr
+
+function %i8_ult(i8) -> i8 {
+block0(v0: i8):
+    v9 = iconst.i8 200
+    v1 = icmp ult v0, v9
+    return v1
+}
+
+; VCode:
+; block0:
+;   uxtb r2, r0
+;   cmp r2, #200
+;   cset r0, lo
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   uxtb r2, r0
+;   cmp r2, #0xc8
+;   mov r0, #0
+;   movlo r0, #1
+;   bx lr
+
+;; -1 as an unsigned 8-bit value is 255.
+function %i8_ugt_minus1(i8) -> i8 {
+block0(v0: i8):
+    v9 = iconst.i8 -1
+    v1 = icmp ugt v0, v9
+    return v1
+}
+
+; VCode:
+; block0:
+;   mov r0, #0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mov r0, #0
+;   bx lr
+
+;; ... and -1 as a signed one.
+function %i8_slt_minus1(i8) -> i8 {
+block0(v0: i8):
+    v9 = iconst.i8 -1
+    v1 = icmp slt v0, v9
+    return v1
+}
+
+; VCode:
+; block0:
+;   sxtb r2, r0
+;   cmn r2, #1
+;   cset r0, lt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   sxtb r2, r0
+;   cmn r2, #1
+;   mov r0, #0
+;   movlt r0, #1
+;   bx lr
+
+;; Sign-extended -129 isn't a modified immediate.
+function %i16_sge(i16) -> i8 {
+block0(v0: i16):
+    v9 = iconst.i16 -129
+    v1 = icmp sge v0, v9
+    return v1
+}
+
+; VCode:
+; block0:
+;   sxth r2, r0
+;   cmn r2, #129
+;   cset r0, ge
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   sxth r2, r0
+;   cmn r2, #0x81
+;   mov r0, #0
+;   movge r0, #1
+;   bx lr
+
+;; A branch on a negated float comparison (from `br_if (eqz (f64.le ..))`).
+function %brif_not_fle(f64, f64) -> i32 {
+block0(v0: f64, v1: f64):
+    v2 = fcmp le v0, v1
+    v3 = iconst.i8 0
+    v4 = icmp eq v2, v3
+    brif v4, block1, block2
+
+block1:
+    v5 = iconst.i32 1
+    return v5
+
+block2:
+    v6 = iconst.i32 2
+    return v6
+}
+
+; VCode:
+; block0:
+;   vcmp.f64 d0, d1 ; vmrs APSR_nzcv, fpscr
+;   bhi label2 ; b label1
+; block1:
+;   mov r0, #2
+;   bx lr
+; block2:
+;   mov r0, #1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vcmp.f64 d0, d1
+;   vmrs apsr_nzcv, fpscr
+;   bhi #0x14
+; block1: ; offset 0xc
+;   mov r0, #2
+;   bx lr
+; block2: ; offset 0x14
+;   mov r0, #1
+;   bx lr
+
+
+;; Comparison results are already 0 or 1 in a whole register, so extending
+;; them is free.
+function %uextend_icmp(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = icmp slt v0, v1
+    v3 = uextend.i32 v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   cmp r0, r1
+;   cset r0, lt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, r1
+;   mov r0, #0
+;   movlt r0, #1
+;   bx lr
+
+function %uextend_fcmp_i64(f64, f64) -> i64 {
+block0(v0: f64, v1: f64):
+    v2 = fcmp ueq v0, v1
+    v3 = uextend.i64 v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   mov r1, #1
+;   vcmp.f64 d0, d1 ; vmrs APSR_nzcv, fpscr
+;   cset r0, eq
+;   csel r0, r1, r0, vs
+;   mov r1, #0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mov r1, #1
+;   vcmp.f64 d0, d1
+;   vmrs apsr_nzcv, fpscr
+;   mov r0, #0
+;   moveq r0, #1
+;   movvs r0, r1
+;   mov r1, #0
+;   bx lr

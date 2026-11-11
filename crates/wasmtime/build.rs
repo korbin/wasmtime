@@ -20,7 +20,7 @@ fn main() {
     // Determine if the current host architecture is supported by Cranelift
     // meaning that we might be executing native code.
     let has_host_compiler_backend = match target_arch.as_str() {
-        "x86_64" | "riscv64" | "s390x" | "aarch64" => true,
+        "x86_64" | "riscv64" | "s390x" | "aarch64" | "arm" => true,
         _ => false,
     };
 
@@ -122,7 +122,7 @@ fn has_unix_signal_handler(arch: &str) -> bool {
     match (os.as_str(), arch) {
         ("linux" | "android" | "illumos" | "freebsd" | "openbsd" | "redox", "x86_64") => true,
         ("linux" | "android" | "freebsd", "aarch64") => true,
-        ("linux", "s390x" | "riscv64") => true,
+        ("linux", "s390x" | "riscv64" | "arm") => true,
         _ => false,
     }
 }

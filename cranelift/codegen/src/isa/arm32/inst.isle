@@ -1,0 +1,2160 @@
+;; ARMv7-A (A32 encoding) instruction definitions and lowering helpers.
+
+;;;; Machine instructions ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(type MInst
+  (enum
+    ;; A no-op of zero size.
+    (Nop0)
+
+    ;; A no-op that is one instruction large.
+    (Nop4)
+
+    ;; Data-processing with a register operand, optionally shifted by an
+    ;; immediate: `op{s} rd, rn, rm, <shift>`.
+    (AluRRR
+      (op AluOp)
+      (s bool)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (shift ShiftOpAndAmt))
+
+    ;; Data-processing with a register operand shifted by a register:
+    ;; `op{s} rd, rn, rm, <shift_op> rs`.
+    (AluRRRShift
+      (op AluOp)
+      (s bool)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (shift_op ShiftOp)
+      (rs Reg))
+
+    ;; Data-processing with a modified immediate: `op{s} rd, rn, #imm`.
+    (AluRRImm
+      (op AluOp)
+      (s bool)
+      (rd WritableReg)
+      (rn Reg)
+      (imm ModImm))
+
+    ;; `mov{s}/mvn{s} rd, rm, <shift>`.
+    (MovRR
+      (op MovOp)
+      (s bool)
+      (rd WritableReg)
+      (rm Reg)
+      (shift ShiftOpAndAmt))
+
+    ;; `mov rd, rm, <shift_op> rs` (register-controlled shift).
+    (MovRRShift
+      (rd WritableReg)
+      (rm Reg)
+      (shift_op ShiftOp)
+      (rs Reg))
+
+    ;; `mov/mvn rd, #imm`.
+    (MovImm
+      (op MovOp)
+      (rd WritableReg)
+      (imm ModImm))
+
+    ;; `movw rd, #imm16` (zero-extending).
+    (MovW
+      (rd WritableReg)
+      (imm u16))
+
+    ;; `movt rd, #imm16` (writes the top half, keeping the bottom half of `rn`).
+    (MovT
+      (rd WritableReg)
+      (rn Reg)
+      (imm u16))
+
+    ;; A plain integer register move (used for regalloc moves).
+    (Mov
+      (rd WritableReg)
+      (rm Reg))
+
+    ;; A comparison with a (shifted) register: `cmp/cmn/tst/teq rn, rm, <shift>`.
+    (CmpRR
+      (op CmpOp)
+      (rn Reg)
+      (rm Reg)
+      (shift ShiftOpAndAmt))
+
+    ;; A conditionally-executed comparison: `cmp{cond} rn, rm`.
+    (CCmpRR
+      (op CmpOp)
+      (cond Cond)
+      (rn Reg)
+      (rm Reg))
+
+    ;; A conditionally-executed comparison: `cmp{cond} rn, #imm`.
+    (CCmpRImm
+      (op CmpOp)
+      (cond Cond)
+      (rn Reg)
+      (imm ModImm))
+
+    ;; A comparison with an immediate: `cmp/cmn/tst/teq rn, #imm`.
+    (CmpRImm
+      (op CmpOp)
+      (rn Reg)
+      (imm ModImm))
+
+    ;; Conditional select based on the flags: `rd = cond ? rn : rm`.
+    (CSel
+      (rd WritableReg)
+      (cond Cond)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Conditional move of an immediate: `rd = cond ? imm : rm` (or `~imm`
+    ;; for `mvn`), with `rd` tied to `rm`.
+    (CSelImm
+      (op MovOp)
+      (rd WritableReg)
+      (cond Cond)
+      (imm ModImm)
+      (rm Reg))
+
+    ;; Materialize a condition: `rd = cond ? 1 : 0`.
+    (CSet
+      (rd WritableReg)
+      (cond Cond))
+
+    ;; Materialize a condition as a mask: `rd = cond ? -1 : 0`.
+    (CSetm
+      (rd WritableReg)
+      (cond Cond))
+
+    ;; `mul rd, rn, rm`.
+    (Mul
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; `mla/mls rd, rn, rm, ra`.
+    (MulAcc
+      (op MulAccOp)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (ra Reg))
+
+    ;; `umull/smull rd_lo, rd_hi, rn, rm`.
+    (MulLong
+      (op MulLongOp)
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; `umaal rd_lo, rd_hi, rn, rm`: rd_hi:rd_lo = rn * rm + rd_lo + rd_hi.
+    (Umaal
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (ra_lo Reg)
+      (ra_hi Reg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; `sdiv/udiv rd, rn, rm` (requires `has_idiv`).
+    (Div
+      (signed bool)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Software 32-bit unsigned division and remainder for cores without
+    ;; hardware division. Divisor must be non-zero.
+    (UDivMod32
+      (rd_quot WritableReg)
+      (rd_rem WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Software 64-bit unsigned division and remainder.
+    ;; Divisor must be non-zero. With `idiv`, uses the hardware 32-bit divider
+    ;; when the divisor fits in 32 bits.
+    (UDivMod64
+      (idiv bool)
+      (quot_lo WritableReg)
+      (quot_hi WritableReg)
+      (rem_lo WritableReg)
+      (rem_hi WritableReg)
+      (n_lo Reg)
+      (n_hi Reg)
+      (d_lo Reg)
+      (d_hi Reg))
+
+    ;; One-source integer bit operations: `clz/rbit/rev/... rd, rm`.
+    (BitRR
+      (op BitOp)
+      (rd WritableReg)
+      (rm Reg))
+
+    ;; 64-bit shift by a register amount in `[0, 63]`.
+    (Shift64
+      (op ShiftOp)
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (rn_lo Reg)
+      (rn_hi Reg)
+      (amt Reg)
+      (tmp WritableReg))
+
+    ;; A 64-bit rotate (left if `left`) by `amt` modulo 64: by 32 or more,
+    ;; the halves are exchanged (with conditional execution), and each half
+    ;; of the result combines the two halves shifted by `amt` modulo 32 and
+    ;; 32 minus that. `t1` and `t2` are temporaries.
+    (Rot64
+      (left bool)
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (rn_lo Reg)
+      (rn_hi Reg)
+      (amt Reg)
+      (t1 WritableReg)
+      (t2 WritableReg))
+
+    ;; An integer load.
+    (Load
+      (op LoadOp)
+      (rd WritableReg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; An integer store.
+    (Store
+      (op StoreOp)
+      (rt Reg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; Compute the address described by an addressing mode.
+    (LoadAddr
+      (rd WritableReg)
+      (mem AMode))
+
+    ;; One-source floating-point operation: `vabs/vneg/vsqrt/vmov`.
+    (FpuRR
+      (op FpuOp1)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Round to an integral value (ARMv8): `vrint{p,m,z,n} rd, rn`.
+    (FpuRint
+      (mode FpuRoundMode)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Round each lane of a vector to an integral value (ARMv8), with the
+    ;; VFP `vrint` (NEON's would flush denormals to zero). F32 lanes go
+    ;; through the low D register `tmp`, which has S-register halves.
+    (VecRint
+      (mode FpuRoundMode)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (tmp WritableReg))
+
+    ;; Zero a floating-point register (NEON): `vmov.i32 rd, #0`.
+    (FpuZero
+      (rd WritableReg))
+
+    ;; Load a floating-point constant from the constant pool:
+    ;; `vldr rd, [pc, #off]`.
+    (FpuLoadConst
+      (size FpuSize)
+      (rd WritableReg)
+      (constant VCodeConstant))
+
+    ;; Load a 128-bit vector constant from the constant pool, one 64-bit
+    ;; half at a time: `vldr d(2n), [pc, #lo] ; vldr d(2n+1), [pc, #hi]`.
+    (VecLoadConst
+      (rd WritableReg)
+      (lo VCodeConstant)
+      (hi VCodeConstant))
+
+    ;; Zero a vector register: `vmov.i32 rd, #0`.
+    (VecZero
+      (rd WritableReg))
+
+    ;; Load a floating-point immediate (VFPv3): `vmov.f32/f64 rd, #imm`, where
+    ;; `imm` is the 8-bit encoded form.
+    (FpuMovImm
+      (size FpuSize)
+      (rd WritableReg)
+      (imm u8))
+
+    ;; Two-source floating-point operation: `vadd/vsub/vmul/vdiv`.
+    (FpuRRR
+      (op FpuOp2)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Fused multiply-accumulate (VFPv4): `vfma/vfms/vfnma/vfnms rd, rn, rm`,
+    ;; with `rd` initially holding `ra`.
+    (FpuRRRR
+      (op FpuOp3)
+      (size FpuSize)
+      (rd WritableReg)
+      (ra Reg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; `vcmp rn, rm; vmrs APSR_nzcv, fpscr`.
+    (FpuCmp
+      (size FpuSize)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Floating-point conversion: `vcvt`.
+    (FpuCvt
+      (op FpuCvtOp)
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Floating-point conditional select: `rd = cond ? rn : rm`.
+    (FpuCSel
+      (size FpuSize)
+      (rd WritableReg)
+      (cond Cond)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Floating-point minimum/maximum with Cranelift semantics (NaN
+    ;; propagating, -0.0 < +0.0).
+    (FpuMinMax
+      (is_min bool)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (tmp WritableReg))
+
+    ;; Floating-point rounding to an integral value.
+    (FpuRound
+      (mode FpuRoundMode)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (tmp1 WritableReg)
+      (tmp2 WritableReg)
+      (ftmp WritableReg))
+
+    ;; `vldr`. Requires a word-aligned address.
+    (FpuLoad
+      (size FpuSize)
+      (rd WritableReg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; `vstr`. Requires a word-aligned address.
+    (FpuStore
+      (size FpuSize)
+      (rt Reg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; A floating-point load with no alignment requirement (NEON):
+    ;; `vld1.8 {rd}, [addr]` for F64, and `vld1.32 {rd[0]}, [addr]` (the low
+    ;; half `s(2n)`) for F32.
+    (FpuLoadUnaligned
+      (size FpuSize)
+      (rd WritableReg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; An F32 store with no alignment requirement (NEON):
+    ;; `vst1.32 {rt[0]}, [addr]`.
+    (FpuStoreUnaligned32
+      (rt Reg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; `vmov s(rd), rn`.
+    (MovToFpu32
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; `vmov rd, s(rn)`.
+    (MovFromFpu32
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; `vmov rd, lo, hi`.
+    (MovToFpu64
+      (rd WritableReg)
+      (lo Reg)
+      (hi Reg))
+
+    ;; `vmov rd_lo, rd_hi, rn`.
+    (MovFromFpu64
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (rn Reg))
+
+    ;; A floating-point register move (used for regalloc moves).
+    (FpuMove
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; An unconditional branch.
+    (Jump
+      (dest MachLabel))
+
+    ;; A conditional branch; falls through to `not_taken` (via a jump when
+    ;; necessary).
+    (CondBr
+      (taken MachLabel)
+      (not_taken MachLabel)
+      (cond Cond))
+
+    ;; Trap if the condition holds.
+    (TrapIf
+      (cond Cond)
+      (trap_code TrapCode))
+
+    ;; An unconditional trap.
+    (Udf
+      (trap_code TrapCode))
+
+    ;; A breakpoint.
+    (Bkpt)
+
+    ;; A jump table. `targets[0]` is the default target; the remainder are
+    ;; the table entries.
+    (BrTable
+      (index Reg)
+      (targets BoxVecMachLabel))
+
+    ;; A direct call (`bl`).
+    (Call (info BoxCallInfo))
+
+    ;; An indirect call (`blx`).
+    (CallInd (info BoxCallIndInfo))
+
+    ;; A direct tail call.
+    (ReturnCall (info BoxReturnCallInfo))
+
+    ;; An indirect tail call.
+    (ReturnCallInd (info BoxReturnCallIndInfo))
+
+    ;; A pseudo-instruction that captures register arguments in vregs.
+    (Args
+      (args BoxedSliceArgPair))
+
+    ;; A pseudo-instruction that moves vregs to return registers.
+    (Rets
+      (rets BoxedSliceRetPair))
+
+    ;; Return to the caller (`bx lr`).
+    (Ret)
+
+    ;; Load the absolute address of an external name.
+    (LoadExtName
+      (rd WritableReg)
+      (name BoxExternalName)
+      (offset i32))
+
+    ;; Load the address of a nearby external name using a PC-relative
+    ;; literal (`ldr rd, [pc, #4]; add rd, pc, rd; b 1f; .word name - .; 1:`).
+    (LoadExtNameNear
+      (rd WritableReg)
+      (name BoxExternalName)
+      (offset i32))
+
+    ;; Load the address of a label.
+    (LabelAddress
+      (rd WritableReg)
+      (label MachLabel))
+
+    ;; Copy a physical register (e.g. `sp` or `fp`) into a vreg.
+    (MovFromPReg
+      (rd WritableReg)
+      (rm PReg))
+
+    ;; A memory barrier (`dmb ish`).
+    (Fence)
+
+    ;; A load-exclusive (`ldrex{b,h}`).
+    (LoadExclusive
+      (size u8)
+      (rd WritableReg)
+      (addr Reg))
+
+    ;; An atomic read-modify-write loop on a 8/16/32-bit location.
+    (AtomicRmwLoop
+      (op AtomicRmwOp)
+      (size u8)
+      (rd WritableReg)
+      (addr Reg)
+      (operand Reg)
+      (tmp1 WritableReg)
+      (tmp2 WritableReg)
+      (flags MemFlagsData)
+      (acq_rel bool))
+
+    ;; Sequences on exclusive accesses (`AtomicRmwLoop` etc.) use the
+    ;; load-acquire/store-release exclusives (ARMv8) instead of barriers when
+    ;; `acq_rel` is set.
+
+    ;; A load-acquire (ARMv8): `lda{b,h} rd, [addr]`.
+    (LoadAcquire
+      (size u8)
+      (rd WritableReg)
+      (addr Reg)
+      (flags MemFlagsData))
+
+    ;; A store-release (ARMv8): `stl{b,h} rt, [addr]`.
+    (StoreRelease
+      (size u8)
+      (rt Reg)
+      (addr Reg)
+      (flags MemFlagsData))
+
+    ;; An atomic compare-and-swap loop on a 8/16/32-bit location.
+    (AtomicCasLoop
+      (size u8)
+      (rd WritableReg)
+      (addr Reg)
+      (expected Reg)
+      (replacement Reg)
+      (tmp WritableReg)
+      (flags MemFlagsData)
+      (acq_rel bool))
+
+    ;; An atomic 64-bit read-modify-write loop using `ldrexd/strexd`.
+    ;; The old value is returned in r0:r1, the operand is in r2:r3, the
+    ;; address in r7, and r4, r5 and r6 are clobbered.
+    (AtomicRmwLoop64
+      (op AtomicRmwOp)
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (addr Reg)
+      (operand_lo Reg)
+      (operand_hi Reg)
+      (flags MemFlagsData)
+      (acq_rel bool))
+
+    ;; An atomic 64-bit load: `ldrexd r0, r1, [addr]; clrex; dmb ish`.
+    (AtomicLoad64
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (addr Reg)
+      (flags MemFlagsData)
+      (acq_rel bool))
+
+    ;; An atomic 64-bit compare-and-swap loop using `ldrexd/strexd`.
+    ;; Old value in r0:r1, expected in r2:r3, replacement in r4:r5,
+    ;; address in r7; r6 is clobbered.
+    (AtomicCasLoop64
+      (rd_lo WritableReg)
+      (rd_hi WritableReg)
+      (addr Reg)
+      (expected_lo Reg)
+      (expected_hi Reg)
+      (replacement_lo Reg)
+      (replacement_hi Reg)
+      (flags MemFlagsData)
+      (acq_rel bool))
+
+    ;; Push a set of core registers: `push {regs}`.
+    (Push
+      (mask u16))
+
+    ;; Pop a set of core registers: `pop {regs}`.
+    (Pop
+      (mask u16))
+
+    ;; Push a range of double registers: `vpush {d<first>-d<first+count-1>}`.
+    (VPush
+      (first u8)
+      (count u8))
+
+    ;; Pop a range of double registers.
+    (VPop
+      (first u8)
+      (count u8))
+
+    ;; Adjust SP by a constant without using any scratch register.
+    (SpAdjust
+      (amount i32))
+
+    ;; A probe loop for a large stack frame.
+    (StackProbeLoop
+      (guard_size u32)
+      (probe_count u32))
+
+    ;; Meta-instruction to emit unwind info.
+    (Unwind
+      (inst UnwindInst))
+
+    ;; A dummy use, useful to keep a value alive.
+    (DummyUse
+      (reg Reg))
+
+    ;; Emit an island of constants/veneers if necessary.
+    (EmitIsland
+      (needed_space u32))
+
+    ;; A sequence point (zero-size).
+    (SequencePoint)
+
+    ;;;; NEON (Advanced SIMD) instructions on Q registers ;;;;;;;;;;;;;;;;;;;;;
+
+    ;; A 128-bit register move: `vorr qd, qn, qn`.
+    (VecMove
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Three registers of the same length: `op.<size> qd, qn, qm`.
+    (VecRRR
+      (op VecAluOp)
+      (size u8)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Bitwise select: `rd = (ri & rn) | (~ri & rm)` (`vbsl` with `rd`
+    ;; initially holding the mask `ri`).
+    (VecBsl
+      (rd WritableReg)
+      (ri Reg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Two registers, miscellaneous: `op.<size> qd, qm`.
+    (VecRR
+      (op VecMiscOp)
+      (size u8)
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Shift by an immediate: `vshl/vshr.<size> qd, qm, #amt`.
+    (VecShiftImm
+      (op VecShiftOp)
+      (size u8)
+      (rd WritableReg)
+      (rn Reg)
+      (amt u8))
+
+    ;; Unsigned shift right and accumulate into the shifted register itself:
+    ;; `vsra.u<size> qd, qd, #amt` (`rd` reuses `rn`), i.e.
+    ;; `rd = rn + (rn >> amt)` in each lane.
+    (VecSraSelf
+      (size u8)
+      (rd WritableReg)
+      (rn Reg)
+      (amt u8))
+
+    ;; Narrow two registers into one: the low half of `rd` from `rn` and the
+    ;; high half from `rm`. `size` is the destination lane size.
+    (VecNarrow
+      (op VecNarrowOp)
+      (size u8)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Widen the low or high half of `rn` (`vmovl.<s|u><size>`), where `size`
+    ;; is the source lane size.
+    (VecWiden
+      (signed bool)
+      (high bool)
+      (size u8)
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Widening multiply of the low or high halves: `vmull.<s|u><size>`.
+    (VecMulLong
+      (signed bool)
+      (high bool)
+      (size u8)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Pairwise operation on D halves producing a Q result:
+    ;; `rd.lo = op(rn.lo, rn.hi)`, `rd.hi = op(rm.lo, rm.hi)`.
+    (VecPairwise
+      (op VecAluOp)
+      (size u8)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg))
+
+    ;; Duplicate a core register into all lanes: `vdup.<size> qd, rn`.
+    (VecDup
+      (size u8)
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Duplicate a lane into all lanes: `vdup.<size> qd, dm[x]`.
+    (VecDupLane
+      (size u8)
+      (rd WritableReg)
+      (rn Reg)
+      (lane u8))
+
+    ;; Insert a core register into a lane, keeping the other lanes of `ri`.
+    (VecMovToLane
+      (size u8)
+      (rd WritableReg)
+      (ri Reg)
+      (rn Reg)
+      (lane u8))
+
+    ;; Extract a lane into a core register.
+    (VecMovFromLane
+      (size u8)
+      (signed bool)
+      (rd WritableReg)
+      (rn Reg)
+      (lane u8))
+
+    ;; Build a vector from four 32-bit core registers (lane 0 first).
+    (VecFromGprs
+      (rd WritableReg)
+      (r0 Reg)
+      (r1 Reg)
+      (r2 Reg)
+      (r3 Reg))
+
+    ;; Copy a D half (`half` 0 or 1) of a vector into a float register.
+    (VecToFpu
+      (rd WritableReg)
+      (rn Reg)
+      (half u8))
+
+    ;; The bitwise or of the two D halves of a vector, into a float
+    ;; register: `vorr dd, dn, dn+1`.
+    (VecOrrHalves
+      (rd WritableReg)
+      (rn Reg))
+
+    ;; Replace a D half of `ri` with the float register `rn`.
+    (VecFromFpu
+      (rd WritableReg)
+      (ri Reg)
+      (rn Reg)
+      (half u8))
+
+    ;; Extract an f32 lane into a float register.
+    (VecToFpu32
+      (rd WritableReg)
+      (rn Reg)
+      (lane u8)
+      (tmp WritableReg))
+
+    ;; Replace an f32 lane of `ri` with the f32 in `rn`.
+    (VecFromFpu32
+      (rd WritableReg)
+      (ri Reg)
+      (rn Reg)
+      (lane u8)
+      (tmp WritableReg))
+
+    ;; A 128-bit load (`vld1.8`), from any alignment.
+    (VecLoad
+      (rd WritableReg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; Load the low 64 bits of a vector (`vld1.8 {dd}`, `size` 3) or its
+    ;; lowest 32-bit lane (`vld1.32 {dd[0]}`, `size` 2), to any alignment.
+    ;; The rest of the vector is zeroed (`vmov.i32 qd, #0` first) if
+    ;; `zero_rest`, and is otherwise unspecified.
+    (VecLoadLow
+      (size u8)
+      (zero_rest bool)
+      (rd WritableReg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; Load one lane, keeping the others (`rd` reuses `ri`):
+    ;; `vld1.<size> {dd[x]}, [base]` for 8-, 16- and 32-bit lanes, and
+    ;; `vld1.8 {dd}, [base]` for 64-bit ones (`size` 3), to any alignment.
+    (VecLoadLane
+      (size u8)
+      (rd WritableReg)
+      (ri Reg)
+      (lane u8)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; Store one lane, as for `VecLoadLane`.
+    (VecStoreLane
+      (size u8)
+      (rt Reg)
+      (lane u8)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; Load an 8-, 16- or 32-bit element into all lanes:
+    ;; `vld1.<size> {dd[], dd+1[]}`, to any alignment.
+    (VecLoadSplat
+      (size u8)
+      (rd WritableReg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; A 128-bit store (`vst1.8`), to any alignment.
+    (VecStore
+      (rt Reg)
+      (mem AMode)
+      (flags MemFlagsData))
+
+    ;; Byte table lookup with one or two table registers. Indices out of
+    ;; range produce zero. Two-register tables use fixed registers q14 and
+    ;; q15 so that the table occupies consecutive D registers.
+    (VecTbl
+      (rd WritableReg)
+      (tbl1 Reg)
+      (tbl2 OptionReg)
+      (idx Reg))
+
+    ;; Byte extract: `vext.8 qd, qn, qm, #imm`.
+    (VecExt
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (imm u8))
+
+    ;; Floating-point lane-wise arithmetic, computed with scalar VFP
+    ;; instructions (NEON floating-point arithmetic flushes denormals).
+    (VecFpuRRR
+      (op FpuOp2)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (t1 WritableReg)
+      (t2 WritableReg))
+
+    ;; Lane-wise unary floating-point operation (`vabs/vneg/vsqrt`).
+    (VecFpuRR
+      (op FpuOp1)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (t1 WritableReg))
+
+    ;; Lane-wise fused multiply-add: `rd = ra + rn * rm` (VFPv4).
+    (VecFpuFma
+      (size FpuSize)
+      (rd WritableReg)
+      (ra Reg)
+      (rn Reg)
+      (rm Reg)
+      (t1 WritableReg)
+      (t2 WritableReg)
+      (t3 WritableReg))
+
+    ;; Lane-wise floating-point comparison producing a lane mask.
+    (VecFpuCmp
+      (cond FloatCC)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (t1 WritableReg)
+      (t2 WritableReg)
+      (gtmp WritableReg))
+
+    ;; Lane-wise floating-point min/max with Cranelift semantics.
+    (VecFpuMinMax
+      (is_min bool)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (t1 WritableReg)
+      (t2 WritableReg)
+      (gtmp WritableReg))
+
+    ;; Lane-wise rounding to an integral value.
+    (VecFpuRound
+      (mode FpuRoundMode)
+      (size FpuSize)
+      (rd WritableReg)
+      (rn Reg)
+      (t1 WritableReg)
+      (t2 WritableReg)
+      (t3 WritableReg)
+      (gtmp1 WritableReg)
+      (gtmp2 WritableReg))
+
+    ;; `fmin`/`fmax` of f32x4 lanes, with NEON integer operations (NEON
+    ;; float operations flush denormals): the bit patterns are mapped to
+    ;; integers in the same order (`x ^ ((x >> 31) >>u 1)`, which also puts
+    ;; -0 below +0) and compared, and lanes with a NaN input get the
+    ;; canonical NaN (`x + y`, as NEON always produces the default NaN).
+    ;; `ta` and `tb` are vector temporaries.
+    (VecMinMaxF32
+      (is_min bool)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (ta WritableReg)
+      (tb WritableReg))
+
+    ;; Population count of a 32-bit value (`lo`; `hi` is unused) or a 64-bit
+    ;; one (`lo`, `hi`) with NEON, as GCC does: `vcnt.8` and pairwise
+    ;; additions in the float register `tmp`.
+    (PopcntNeon
+      (rd WritableReg)
+      (lo Reg)
+      (hi Reg)
+      (tmp WritableReg)
+      (is64 bool))
+
+    ;; An i64x2 multiplication from 32-bit products: the cross products
+    ;; `a.lo * b.hi + a.hi * b.lo` (`vrev64.32`, `vmul.i32`, `vpaddl.u32`),
+    ;; shifted up by 32, plus the full products of the low words (`vmovn`,
+    ;; `vmlal.u32`). `tb` is a vector temporary.
+    (VecMulI64
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (tb WritableReg))
+
+    ;; An f32x4 comparison (`eq`, `ne`, `lt`, `le`, `gt` or `ge`) with NEON
+    ;; integer operations, comparing order-preserving integer keys of the
+    ;; lanes (as for `VecMinMaxF32`, with -0 and +0 mapped to the same key)
+    ;; and masking out lanes with a NaN input.
+    (VecCmpF32
+      (cond FloatCC)
+      (rd WritableReg)
+      (rn Reg)
+      (rm Reg)
+      (ta WritableReg)
+      (tb WritableReg))
+
+    ;; Round the lanes of an f64x2 to integral values without `vrint`, by
+    ;; adding and subtracting 2^52 with the sign of the lane (`qb`; `qa` holds
+    ;; 2^52 and `qc` the sign mask) in the rounding mode, with VFP: lanes with
+    ;; `|x| >= 2^52` are kept (NaN lanes get the quieted sum), and the sign of
+    ;; the input is copied onto the result. `t` is a float temporary and
+    ;; `gtmp` holds the saved FPSCR.
+    (VecRoundF64
+      (mode FpuRoundMode)
+      (rd WritableReg)
+      (rn Reg)
+      (qa WritableReg)
+      (qb WritableReg)
+      (qc WritableReg)
+      (t WritableReg)
+      (gtmp WritableReg))
+
+    ;; Round the lanes of an f32x4 to integral values without `vrint`:
+    ;; convert each lane to an integer and back with VFP (in the rounding
+    ;; mode, set in the FPSCR for `Ceil` and `Floor`), then, with NEON, copy
+    ;; the sign of the input onto the result, keep inputs with
+    ;; `|x| >= 2^23` (integral or infinite already), and make NaN lanes the
+    ;; canonical NaN. `qa`, `qb` are vector temporaries, `t1`, `t2` float ones
+    ;; (accessed as S registers) and `gtmp` holds the saved FPSCR.
+    (VecRoundF32
+      (mode FpuRoundMode)
+      (rd WritableReg)
+      (rn Reg)
+      (qa WritableReg)
+      (qb WritableReg)
+      (t1 WritableReg)
+      (t2 WritableReg)
+      (gtmp WritableReg))
+))
+
+;;;; Operation enums ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(type AluOp
+  (enum
+    (And)
+    (Eor)
+    (Sub)
+    (Rsb)
+    (Add)
+    (Adc)
+    (Sbc)
+    (Rsc)
+    (Orr)
+    (Bic)))
+
+(type CmpOp
+  (enum
+    (Tst)
+    (Teq)
+    (Cmp)
+    (Cmn)))
+
+(type MovOp
+  (enum
+    (Mov)
+    (Mvn)))
+
+(type ShiftOp
+  (enum
+    (Lsl)
+    (Lsr)
+    (Asr)
+    (Ror)))
+
+(type MulAccOp
+  (enum
+    (Mla)
+    (Mls)))
+
+(type MulLongOp
+  (enum
+    (Umull)
+    (Smull)))
+
+(type BitOp
+  (enum
+    (Clz)
+    (Rbit)
+    (Rev)
+    (Rev16)
+    (Revsh)
+    (Sxtb)
+    (Sxth)
+    (Uxtb)
+    (Uxth)))
+
+(type LoadOp
+  (enum
+    (Ldr)
+    (Ldrb)
+    (Ldrsb)
+    (Ldrh)
+    (Ldrsh)))
+
+(type StoreOp
+  (enum
+    (Str)
+    (Strb)
+    (Strh)))
+
+(type FpuSize
+  (enum
+    (F32)
+    (F64)))
+
+(type FpuOp1
+  (enum
+    (Abs)
+    (Neg)
+    (Sqrt)
+    (Mov)))
+
+(type FpuOp2
+  (enum
+    (Add)
+    (Sub)
+    (Mul)
+    (Div)))
+
+(type FpuOp3
+  (enum
+    ;; rd = ra + rn * rm
+    (Fma)
+    ;; rd = ra - rn * rm
+    (Fms)
+    ;; rd = -ra - rn * rm
+    (Fnma)
+    ;; rd = -ra + rn * rm
+    (Fnms)))
+
+(type FpuCvtOp
+  (enum
+    (F32ToF64)
+    (F64ToF32)
+    ;; Truncating conversions to integer; the result is an integer in an
+    ;; S register.
+    (F32ToS32)
+    (F32ToU32)
+    (F64ToS32)
+    (F64ToU32)
+    ;; Conversions from an integer held in an S register.
+    (S32ToF32)
+    (U32ToF32)
+    (S32ToF64)
+    (U32ToF64)))
+
+(type FpuRoundMode
+  (enum
+    (Nearest)
+    (Ceil)
+    (Floor)
+    (Trunc)))
+
+;; NEON "three registers of the same length" operations.
+(type VecAluOp
+  (enum
+    (Add)
+    (Sub)
+    (Mul)
+    (QAddS)
+    (QAddU)
+    (QSubS)
+    (QSubU)
+    (RHAddU)
+    (MinS)
+    (MinU)
+    (MaxS)
+    (MaxU)
+    (Ceq)
+    (CgtS)
+    (CgtU)
+    (CgeS)
+    (CgeU)
+    (Tst)
+    (And)
+    (Bic)
+    (Orr)
+    (Orn)
+    (Eor)
+    ;; Shift by a signed per-lane amount in the second operand.
+    (ShlS)
+    (ShlU)
+    (QRDMulH)
+    ;; Pairwise operations (only valid in `VecPairwise`).
+    (PAdd)
+    (PMinU)
+    (PMaxU)))
+
+;; NEON "two registers, miscellaneous" operations.
+(type VecMiscOp
+  (enum
+    (Rev64)
+    (Rev32)
+    (Rev16)
+    (PAddlS)
+    (PAddlU)
+    (Cnt)
+    (Mvn)
+    (Abs)
+    (Neg)
+    ;; Compare equal to zero (8-, 16- and 32-bit lanes).
+    (CeqZ)
+    (CvtF32S32)
+    (CvtF32U32)
+    (CvtS32F32)
+    (CvtU32F32)))
+
+;; NEON shift-by-immediate operations.
+(type VecShiftOp
+  (enum
+    (Shl)
+    (ShrS)
+    (ShrU)))
+
+;; NEON narrowing operations.
+(type VecNarrowOp
+  (enum
+    (QMovnS)
+    (QMovnU)
+    (QMovun)))
+
+;;;; External types ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(type Cond extern
+  (enum
+    (Eq)
+    (Ne)
+    (Hs)
+    (Lo)
+    (Mi)
+    (Pl)
+    (Vs)
+    (Vc)
+    (Hi)
+    (Ls)
+    (Ge)
+    (Lt)
+    (Gt)
+    (Le)))
+
+(type AMode (primitive AMode))
+(type OptionReg (primitive OptionReg))
+(type ModImm (primitive ModImm))
+(type ShiftOpAndAmt (primitive ShiftOpAndAmt))
+(type BoxCallInfo (primitive BoxCallInfo))
+(type BoxCallIndInfo (primitive BoxCallIndInfo))
+(type BoxReturnCallInfo (primitive BoxReturnCallInfo))
+(type BoxReturnCallIndInfo (primitive BoxReturnCallIndInfo))
+
+;;;; Immediates and operand helpers ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Try to encode a value as a modified immediate.
+(decl pure partial mod_imm_from_u32 (u32) ModImm)
+(extern constructor mod_imm_from_u32 mod_imm_from_u32)
+
+;; Extract a constant value that fits in a modified immediate.
+(decl mod_imm_from_value (ModImm) Value)
+(extern extractor mod_imm_from_value mod_imm_from_value)
+
+;; A constant operand of an 8- or 16-bit comparison with the given condition,
+;; extended like the other operand, if it fits in a modified immediate.
+;; The NEON size code of a vector type with lanes narrower than 64 bits.
+(decl pure partial vec_size_below_64 (Type) u8)
+(extern constructor vec_size_below_64 vec_size_below_64)
+
+;; Shuffle masks (16 byte indices into the concatenation of two vectors).
+;; Bytes `n..n+16` of the concatenation (`vext.8 #n`).
+(decl pure partial shuffle_ext (u128) u8)
+(extern constructor shuffle_ext shuffle_ext)
+;; For a single input (indices taken mod 16): a rotation by `n` bytes.
+(decl pure partial shuffle_rotate (u128) u8)
+(extern constructor shuffle_rotate shuffle_rotate)
+;; For a single input: reversing elements of `size` within groups (`vrev*`).
+(decl shuffle_rev (VecMiscOp u8) u128)
+(extern extractor shuffle_rev shuffle_rev)
+;; For a single input: one 8-, 16- or 32-bit lane in all lanes (`vdup` lane).
+(decl shuffle_dup_lane (u8 u8) u128)
+(extern extractor shuffle_dup_lane shuffle_dup_lane)
+;; The mask of a shuffle that only uses its first (second) input, indexing
+;; that input.
+(decl pure partial shuffle_first_only (u128) u128)
+(extern constructor shuffle_first_only shuffle_first_only)
+(decl pure partial shuffle_second_only (u128) u128)
+(extern constructor shuffle_second_only shuffle_second_only)
+
+;; Whether `VecCmpF32` supports a condition.
+(decl pure vec_cmp_f32_supported (FloatCC) bool)
+(extern constructor vec_cmp_f32_supported vec_cmp_f32_supported)
+
+(decl pure partial icmp_narrow_imm (IntCC Type Value) ModImm)
+(extern constructor icmp_narrow_imm icmp_narrow_imm)
+
+;; Likewise, for a constant whose (extended) negation fits instead (for `cmn`).
+(decl pure partial icmp_narrow_neg_imm (IntCC Type Value) ModImm)
+(extern constructor icmp_narrow_neg_imm icmp_narrow_neg_imm)
+
+;; Extract a constant value whose negation fits in a modified immediate.
+(decl mod_imm_from_neg_value (ModImm) Value)
+(extern extractor mod_imm_from_neg_value mod_imm_from_neg_value)
+
+;; Extract a constant value whose bitwise inverse fits in a modified
+;; immediate.
+(decl mod_imm_from_inv_value (ModImm) Value)
+(extern extractor mod_imm_from_inv_value mod_imm_from_inv_value)
+
+;; Truncate a u64 to u32 (low bits).
+(decl pure u64_low32 (u64) u32)
+(extern constructor u64_low32 u64_low32)
+
+;; High 32 bits of a u64.
+(decl pure u64_high32 (u64) u32)
+(extern constructor u64_high32 u64_high32)
+
+(decl pure u32_low16 (u32) u16)
+(extern constructor u32_low16 u32_low16)
+
+(decl pure u32_high16 (u32) u16)
+(extern constructor u32_high16 u32_high16)
+
+;; No shift applied to the second operand.
+(decl shift_none () ShiftOpAndAmt)
+(extern constructor shift_none shift_none)
+
+;; An immediate shift.
+(decl shift_imm (ShiftOp u8) ShiftOpAndAmt)
+(extern constructor shift_imm shift_imm)
+
+;; Mask a shift amount to the bit-width of the type, returning `None` if the
+;; result is zero.
+(decl pure partial shift_amount_masked (Type Value) u8)
+(extern constructor shift_amount_masked shift_amount_masked)
+
+;; Settings.
+(decl pure has_idiv () bool)
+(extern constructor has_idiv has_idiv)
+
+(decl pure has_vfp4 () bool)
+(extern constructor has_vfp4 has_vfp4)
+
+;; Conditions.
+(decl cond_from_intcc (IntCC) Cond)
+(extern constructor cond_from_intcc cond_from_intcc)
+
+(decl cond_invert (Cond) Cond)
+(extern constructor cond_invert cond_invert)
+
+(decl fpu_size (Type) FpuSize)
+(rule (fpu_size $F32) (FpuSize.F32))
+(rule (fpu_size $F64) (FpuSize.F64))
+
+;; Physical registers.
+(decl fp_reg () PReg)
+(extern constructor fp_reg fp_reg)
+
+(decl sp_reg () PReg)
+(extern constructor sp_reg sp_reg)
+
+;; Addressing modes.
+;; An addressing mode for `addr + offset`, folding a register index (and a
+;; small left shift of it) into the address when the offset is zero.
+(decl amode (Value i32) AMode)
+(rule 0 (amode addr offset) (amode_reg_offset addr offset))
+(rule 1 (amode (iadd $I32 a b) 0) (amode_reg_reg a b 0))
+(rule 2 (amode (iadd $I32 a (ishl $I32 b (iconst _ (u64_from_imm64 (u64_le_3 k))))) 0)
+  (amode_reg_reg a b k))
+(rule 3 (amode (iadd $I32 (ishl $I32 b (iconst _ (u64_from_imm64 (u64_le_3 k)))) a) 0)
+  (amode_reg_reg a b k))
+
+;; A register-plus-offset addressing mode (never register-plus-register),
+;; suitable for a pair of accesses at `offset` and `offset + 4`.
+(decl amode_ro (Value i32) AMode)
+(rule 0 (amode_ro addr offset) (amode_reg_offset addr offset))
+
+;; `amode` with 4 added to the offset of a register-plus-offset mode.
+(decl amode_add4 (AMode) AMode)
+(extern constructor amode_add4 amode_add4)
+
+;; The offset `offset + k`, if it is small enough for the immediate field of
+;; every load and store instruction even with another 4 added (a guarded
+;; base is used with a constant offset only when this saves an instruction).
+(decl pure partial guard_fold_offset (i32 u64) i32)
+(extern constructor guard_fold_offset guard_fold_offset)
+
+;; `k - 1` as a modified immediate (for `k` accepted by `guard_fold_offset`).
+(decl pure u64_minus1_mod_imm (u64) ModImm)
+(extern constructor u64_minus1_mod_imm u64_minus1_mod_imm)
+
+(decl amode_reg_reg (Reg Reg u8) AMode)
+(extern constructor amode_reg_reg amode_reg_reg)
+
+;; Matches a shift amount in `1..=3`, returning it as a `u8`.
+(decl u64_le_3 (u8) u64)
+(extern extractor u64_le_3 u64_le_3)
+
+(decl amode_reg_offset (Reg i32) AMode)
+(extern constructor amode_reg_offset amode_reg_offset)
+
+
+(decl pure memflags_aligned (MemFlagsData) bool)
+(extern constructor memflags_aligned memflags_aligned)
+
+;; Lower a `br_table`.
+(decl lower_br_table (Reg MachLabelSlice) Unit)
+(extern constructor lower_br_table lower_br_table)
+
+;; Calls.
+(decl gen_call_info (Sig ExternalName CallArgList CallRetList OptionTryCallInfo bool) BoxCallInfo)
+(extern constructor gen_call_info gen_call_info)
+
+(decl gen_call_ind_info (Sig Reg CallArgList CallRetList OptionTryCallInfo) BoxCallIndInfo)
+(extern constructor gen_call_ind_info gen_call_ind_info)
+
+(decl gen_return_call_info (Sig ExternalName CallArgList) BoxReturnCallInfo)
+(extern constructor gen_return_call_info gen_return_call_info)
+
+(decl gen_return_call_ind_info (Sig Reg CallArgList) BoxReturnCallIndInfo)
+(extern constructor gen_return_call_ind_info gen_return_call_ind_info)
+
+(decl call_impl (BoxCallInfo) SideEffectNoResult)
+(rule (call_impl info) (SideEffectNoResult.Inst (MInst.Call info)))
+
+(decl call_ind_impl (BoxCallIndInfo) SideEffectNoResult)
+(rule (call_ind_impl info) (SideEffectNoResult.Inst (MInst.CallInd info)))
+
+(decl return_call_impl (BoxReturnCallInfo) SideEffectNoResult)
+(rule (return_call_impl info) (SideEffectNoResult.Inst (MInst.ReturnCall info)))
+
+(decl return_call_ind_impl (BoxReturnCallIndInfo) SideEffectNoResult)
+(rule (return_call_ind_impl info) (SideEffectNoResult.Inst (MInst.ReturnCallInd info)))
+
+;;;; Instruction-emitting helpers ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(decl temp_i32 () WritableReg)
+(rule (temp_i32) (temp_writable_reg $I32))
+
+(decl temp_f64 () WritableReg)
+(rule (temp_f64) (temp_writable_reg $F64))
+
+;; `op rd, rn, rm`
+(decl alu_rrr (AluOp Reg Reg) Reg)
+(rule (alu_rrr op rn rm)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.AluRRR op false rd rn rm (shift_none)))))
+    rd))
+
+;; `op rd, rn, rm, <shift>`
+(decl alu_rrr_shift (AluOp Reg Reg ShiftOpAndAmt) Reg)
+(rule (alu_rrr_shift op rn rm shift)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.AluRRR op false rd rn rm shift))))
+    rd))
+
+;; `op rd, rn, rm, <shift_op> rs`
+(decl alu_rrr_regshift (AluOp Reg Reg ShiftOp Reg) Reg)
+(rule (alu_rrr_regshift op rn rm shift_op rs)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.AluRRRShift op false rd rn rm shift_op rs))))
+    rd))
+
+;; `op rd, rn, #imm`
+(decl alu_rr_imm (AluOp Reg ModImm) Reg)
+(rule (alu_rr_imm op rn imm)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.AluRRImm op false rd rn imm))))
+    rd))
+
+;; `mov rd, rm, <shift>`
+(decl mov_shift (Reg ShiftOpAndAmt) Reg)
+(rule (mov_shift rm shift)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovRR (MovOp.Mov) false rd rm shift))))
+    rd))
+
+;; `mvn rd, rm`
+(decl mvn (Reg) Reg)
+(rule (mvn rm)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovRR (MovOp.Mvn) false rd rm (shift_none)))))
+    rd))
+
+;; `mov rd, rm, <shift_op> rs`
+(decl mov_regshift (Reg ShiftOp Reg) Reg)
+(rule (mov_regshift rm shift_op rs)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovRRShift rd rm shift_op rs))))
+    rd))
+
+;; Single-source bit operation.
+(decl bit_rr (BitOp Reg) Reg)
+(rule (bit_rr op rm)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.BitRR op rd rm))))
+    rd))
+
+(decl mul (Reg Reg) Reg)
+(rule (mul rn rm)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.Mul rd rn rm))))
+    rd))
+
+(decl mul_acc (MulAccOp Reg Reg Reg) Reg)
+(rule (mul_acc op rn rm ra)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MulAcc op rd rn rm ra))))
+    rd))
+
+;; Returns `lo, hi`.
+(decl mul_long (MulLongOp Reg Reg) ValueRegs)
+(rule (mul_long op rn rm)
+  (let ((lo WritableReg (temp_i32))
+        (hi WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MulLong op lo hi rn rm))))
+    (value_regs lo hi)))
+
+;; `umaal`: returns `lo, hi` of `rn * rm + a_lo + a_hi`.
+(decl umaal (Reg Reg Reg Reg) ValueRegs)
+(rule (umaal a_lo a_hi rn rm)
+  (let ((lo WritableReg (temp_i32))
+        (hi WritableReg (temp_i32))
+        (_ Unit (emit (MInst.Umaal lo hi a_lo a_hi rn rm))))
+    (value_regs lo hi)))
+
+(decl div (bool Reg Reg) Reg)
+(rule (div signed rn rm)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.Div signed rd rn rm))))
+    rd))
+
+;; Software unsigned 32-bit division; returns `quotient, remainder`.
+(decl udivmod32 (Reg Reg) ValueRegs)
+(rule (udivmod32 rn rm)
+  (let ((q WritableReg (temp_i32))
+        (r WritableReg (temp_i32))
+        (_ Unit (emit (MInst.UDivMod32 q r rn rm))))
+    (value_regs q r)))
+
+;; Software unsigned 64-bit division; returns `quotient, remainder` as
+;; register pairs.
+(decl udivmod64 (ValueRegs ValueRegs) ValueRegsVec)
+(extern constructor udivmod64 udivmod64)
+
+;; 64-bit shift.
+(decl rot64 (bool ValueRegs Reg) ValueRegs)
+(rule (rot64 left x amt)
+  (let ((lo WritableReg (temp_i32))
+        (hi WritableReg (temp_i32))
+        (t1 WritableReg (temp_i32))
+        (t2 WritableReg (temp_i32))
+        (_ Unit (emit (MInst.Rot64 left lo hi (value_regs_get x 0) (value_regs_get x 1) amt t1 t2))))
+    (value_regs lo hi)))
+
+(decl shift64 (ShiftOp ValueRegs Reg) ValueRegs)
+(rule (shift64 op x amt)
+  (let ((lo WritableReg (temp_i32))
+        (hi WritableReg (temp_i32))
+        (tmp WritableReg (temp_i32))
+        (_ Unit (emit (MInst.Shift64 op lo hi (value_regs_get x 0) (value_regs_get x 1) amt tmp))))
+    (value_regs lo hi)))
+
+;; Materialize a 32-bit constant.
+(decl imm32 (u32) Reg)
+(rule 0 (imm32 n)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovW rd (u32_low16 n))))
+        (rd2 WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovT rd2 rd (u32_high16 n)))))
+    rd2))
+(rule 1 (imm32 n)
+  (if-let 0 (u32_high16 n))
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovW rd (u32_low16 n)))))
+    rd))
+(rule 2 (imm32 n)
+  (if-let imm (mod_imm_from_u32 n))
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovImm (MovOp.Mov) rd imm))))
+    rd))
+(rule 3 (imm32 n)
+  (if-let imm (mod_imm_from_u32 (u32_not n)))
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovImm (MovOp.Mvn) rd imm))))
+    rd))
+
+
+;; Materialize a 64-bit constant as a register pair.
+(decl imm64_pair (u64) ValueRegs)
+(rule (imm64_pair n)
+  (value_regs (imm32 (u64_low32 n)) (imm32 (u64_high32 n))))
+
+;; Loads and stores.
+(decl arm_load (LoadOp AMode MemFlagsData) Reg)
+(rule (arm_load op mem flags)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.Load op rd mem flags))))
+    rd))
+
+(decl arm_store (StoreOp Reg AMode MemFlagsData) SideEffectNoResult)
+(rule (arm_store op rt mem flags)
+  (SideEffectNoResult.Inst (MInst.Store op rt mem flags)))
+
+(decl fpu_load (FpuSize AMode MemFlagsData) Reg)
+(rule (fpu_load size mem flags)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuLoad size rd mem flags))))
+    rd))
+
+(decl fpu_store (FpuSize Reg AMode MemFlagsData) SideEffectNoResult)
+(rule (fpu_store size rt mem flags)
+  (SideEffectNoResult.Inst (MInst.FpuStore size rt mem flags)))
+
+(decl load_addr (AMode) Reg)
+(rule (load_addr mem)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.LoadAddr rd mem))))
+    rd))
+
+;; Floating point.
+(decl fpu_rr (FpuOp1 FpuSize Reg) Reg)
+(rule (fpu_rr op size rn)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuRR op size rd rn))))
+    rd))
+
+(decl fpu_rrr (FpuOp2 FpuSize Reg Reg) Reg)
+(rule (fpu_rrr op size rn rm)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuRRR op size rd rn rm))))
+    rd))
+
+(decl fpu_rrrr (FpuOp3 FpuSize Reg Reg Reg) Reg)
+(rule (fpu_rrrr op size ra rn rm)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuRRRR op size rd ra rn rm))))
+    rd))
+
+(decl fpu_cvt (FpuCvtOp Reg) Reg)
+(rule (fpu_cvt op rn)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuCvt op rd rn))))
+    rd))
+
+(decl fpu_min_max (bool FpuSize Reg Reg) Reg)
+(rule (fpu_min_max is_min size rn rm)
+  (let ((rd WritableReg (temp_f64))
+        (tmp WritableReg (temp_i32))
+        (_ Unit (emit (MInst.FpuMinMax is_min size rd rn rm tmp))))
+    rd))
+
+(decl fpu_rint (FpuRoundMode FpuSize Reg) Reg)
+(rule (fpu_rint mode size rn)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuRint mode size rd rn))))
+    rd))
+
+(decl vec_rint (FpuRoundMode FpuSize Reg) Reg)
+(rule (vec_rint mode size rn)
+  (let ((rd WritableReg (temp_vec))
+        (tmp WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecRint mode size rd rn tmp))))
+    rd))
+
+(decl fpu_round (FpuRoundMode FpuSize Reg) Reg)
+(rule (fpu_round mode size rn)
+  (let ((rd WritableReg (temp_f64))
+        (tmp1 WritableReg (temp_i32))
+        (tmp2 WritableReg (temp_i32))
+        (ftmp WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuRound mode size rd rn tmp1 tmp2 ftmp))))
+    rd))
+
+(decl mov_to_fpu32 (Reg) Reg)
+(rule (mov_to_fpu32 rn)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.MovToFpu32 rd rn))))
+    rd))
+
+(decl mov_from_fpu32 (Reg) Reg)
+(rule (mov_from_fpu32 rn)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovFromFpu32 rd rn))))
+    rd))
+
+(decl fpu_load_unaligned (FpuSize AMode MemFlagsData) Reg)
+(rule (fpu_load_unaligned size mem flags)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuLoadUnaligned size rd mem flags))))
+    rd))
+
+(decl fpu_store_unaligned32 (Reg AMode MemFlagsData) SideEffectNoResult)
+(rule (fpu_store_unaligned32 rt mem flags)
+  (SideEffectNoResult.Inst (MInst.FpuStoreUnaligned32 rt mem flags)))
+
+(decl fpu_load_const (FpuSize VCodeConstant) Reg)
+(rule (fpu_load_const size c)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuLoadConst size rd c))))
+    rd))
+
+(decl vec_load_const (VCodeConstant VCodeConstant) Reg)
+(rule (vec_load_const lo hi)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecLoadConst rd lo hi))))
+    rd))
+
+(decl vec_zero_reg () Reg)
+(rule (vec_zero_reg)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecZero rd))))
+    rd))
+
+(decl fpu_zero () Reg)
+(rule (fpu_zero)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuZero rd))))
+    rd))
+
+(decl fpu_mov_imm (FpuSize u8) Reg)
+(rule (fpu_mov_imm size imm)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.FpuMovImm size rd imm))))
+    rd))
+
+;; The 8-bit VFP immediate encoding of a constant, if it has one.
+(decl pure partial vfp_imm8_f32 (u32) u8)
+(extern constructor vfp_imm8_f32 vfp_imm8_f32)
+(decl pure partial vfp_imm8_f64 (u64) u8)
+(extern constructor vfp_imm8_f64 vfp_imm8_f64)
+
+;; The common value of both 32-bit halves of a 64-bit constant, if they are
+;; equal.
+(decl pure partial u64_same_halves (u64) u32)
+(extern constructor u64_same_halves u64_same_halves)
+
+(decl mov_to_fpu64 (Reg Reg) Reg)
+(rule (mov_to_fpu64 lo hi)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.MovToFpu64 rd lo hi))))
+    rd))
+
+(decl vec_orr_halves (Reg) Reg)
+(rule (vec_orr_halves rn)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecOrrHalves rd rn))))
+    rd))
+
+(decl mov_from_fpu64 (Reg) ValueRegs)
+(rule (mov_from_fpu64 rn)
+  (let ((lo WritableReg (temp_i32))
+        (hi WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovFromFpu64 lo hi rn))))
+    (value_regs lo hi)))
+
+;; Flag producers.
+(decl cmp_rr (Reg Reg) ProducesFlags)
+(rule (cmp_rr rn rm)
+  (ProducesFlags.ProducesFlagsSideEffect (MInst.CmpRR (CmpOp.Cmp) rn rm (shift_none))))
+
+(decl cmp_rr_shift (Reg Reg ShiftOpAndAmt) ProducesFlags)
+(rule (cmp_rr_shift rn rm shift)
+  (ProducesFlags.ProducesFlagsSideEffect (MInst.CmpRR (CmpOp.Cmp) rn rm shift)))
+
+(decl cmp_imm (Reg ModImm) ProducesFlags)
+(rule (cmp_imm rn imm)
+  (ProducesFlags.ProducesFlagsSideEffect (MInst.CmpRImm (CmpOp.Cmp) rn imm)))
+
+(decl cmn_imm (Reg ModImm) ProducesFlags)
+(rule (cmn_imm rn imm)
+  (ProducesFlags.ProducesFlagsSideEffect (MInst.CmpRImm (CmpOp.Cmn) rn imm)))
+
+(decl tst_imm (Reg ModImm) ProducesFlags)
+(rule (tst_imm rn imm)
+  (ProducesFlags.ProducesFlagsSideEffect (MInst.CmpRImm (CmpOp.Tst) rn imm)))
+
+(decl tst_rr (Reg Reg) ProducesFlags)
+(rule (tst_rr rn rm)
+  (ProducesFlags.ProducesFlagsSideEffect (MInst.CmpRR (CmpOp.Tst) rn rm (shift_none))))
+
+;; Compare a 64-bit pair for (in)equality or an unsigned relation:
+;; `cmp hi_a, hi_b; cmpeq lo_a, lo_b`.
+(decl cmp64_unsigned (ValueRegs ValueRegs) ProducesFlags)
+(rule (cmp64_unsigned a b)
+  (ProducesFlags.ProducesFlagsTwiceSideEffect
+    (MInst.CmpRR (CmpOp.Cmp) (value_regs_get a 1) (value_regs_get b 1) (shift_none))
+    (MInst.CCmpRR (CmpOp.Cmp) (Cond.Eq) (value_regs_get a 0) (value_regs_get b 0))))
+
+;; Compare a 64-bit pair for a signed less-than/greater-or-equal relation:
+;; `cmp lo_a, lo_b; sbcs tmp, hi_a, hi_b`.
+(decl cmp64_signed (ValueRegs ValueRegs) ProducesFlags)
+(rule (cmp64_signed a b)
+  (let ((tmp WritableReg (temp_i32)))
+    (ProducesFlags.ProducesFlagsTwiceSideEffect
+      (MInst.CmpRR (CmpOp.Cmp) (value_regs_get a 0) (value_regs_get b 0) (shift_none))
+      (MInst.AluRRR (AluOp.Sbc) true tmp (value_regs_get a 1) (value_regs_get b 1) (shift_none)))))
+
+;; `vcmp; vmrs`
+(decl fpu_cmp (FpuSize Reg Reg) ProducesFlags)
+(rule (fpu_cmp size rn rm)
+  (ProducesFlags.ProducesFlagsSideEffect (MInst.FpuCmp size rn rm)))
+
+;; Flag consumers.
+(decl csel (Cond Reg Reg) ConsumesFlags)
+(rule (csel cond rn rm)
+  (let ((rd WritableReg (temp_i32)))
+    (ConsumesFlags.ConsumesFlagsReturnsReg (MInst.CSel rd cond rn rm) rd)))
+
+;; `rd = cond ? imm : rm`
+(decl csel_imm (Cond ModImm Reg) ConsumesFlags)
+(rule (csel_imm cond imm rm)
+  (let ((rd WritableReg (temp_i32)))
+    (ConsumesFlags.ConsumesFlagsReturnsReg (MInst.CSelImm (MovOp.Mov) rd cond imm rm) rd)))
+
+;; `rd = cond ? ~imm : rm`
+(decl csel_inv_imm (Cond ModImm Reg) ConsumesFlags)
+(rule (csel_inv_imm cond imm rm)
+  (let ((rd WritableReg (temp_i32)))
+    (ConsumesFlags.ConsumesFlagsReturnsReg (MInst.CSelImm (MovOp.Mvn) rd cond imm rm) rd)))
+
+(decl fpu_csel (FpuSize Cond Reg Reg) ConsumesFlags)
+(rule (fpu_csel size cond rn rm)
+  (let ((rd WritableReg (temp_f64)))
+    (ConsumesFlags.ConsumesFlagsReturnsReg (MInst.FpuCSel size rd cond rn rm) rd)))
+
+;; Select a register pair.
+(decl csel64 (Cond ValueRegs ValueRegs) ConsumesFlags)
+(rule (csel64 cond a b)
+  (let ((lo WritableReg (temp_i32))
+        (hi WritableReg (temp_i32)))
+    (ConsumesFlags.ConsumesFlagsTwiceReturnsValueRegs
+      (MInst.CSel lo cond (value_regs_get a 0) (value_regs_get b 0))
+      (MInst.CSel hi cond (value_regs_get a 1) (value_regs_get b 1))
+      (value_regs lo hi))))
+
+(decl cset (Cond) ConsumesFlags)
+(rule (cset cond)
+  (let ((rd WritableReg (temp_i32)))
+    (ConsumesFlags.ConsumesFlagsReturnsReg (MInst.CSet rd cond) rd)))
+
+(decl csetm (Cond) ConsumesFlags)
+(rule (csetm cond)
+  (let ((rd WritableReg (temp_i32)))
+    (ConsumesFlags.ConsumesFlagsReturnsReg (MInst.CSetm rd cond) rd)))
+
+;; `rd = cond1 || cond2 ? 1 : 0`
+(decl cset2 (Cond Cond) ConsumesFlags)
+(rule (cset2 c1 c2)
+  (let ((rd WritableReg (temp_i32))
+        (rd2 WritableReg (temp_i32))
+        (one Reg (imm32 1)))
+    (ConsumesFlags.ConsumesFlagsTwiceReturnsValueRegs
+      (MInst.CSet rd c1)
+      (MInst.CSel rd2 c2 one rd)
+      (value_reg rd2))))
+
+;; A conditional comparison against an immediate: `cmp{cond} rn, #imm`.
+(decl ccmp_imm (Cond Reg ModImm) MInst)
+(rule (ccmp_imm cond rn imm) (MInst.CCmpRImm (CmpOp.Cmp) cond rn imm))
+
+;; A modified immediate that is known to be encodable.
+(decl mod_imm (u32) ModImm)
+(extern constructor mod_imm mod_imm)
+
+(decl pure intcc_signed (IntCC) bool)
+(extern constructor intcc_signed intcc_signed)
+
+;; Conditions for a floating-point comparison: either one condition, or
+;; the disjunction of two.
+(type FloatCond
+  (enum
+    (One (c Cond))
+    (Two (c1 Cond) (c2 Cond))))
+
+(decl pure float_cond (FloatCC) FloatCond)
+(extern constructor float_cond float_cond)
+
+;; A flags-producing sequence along with the condition to test.
+(type FlagsAndCC
+  (enum
+    (FlagsAndCC
+      (flags ProducesFlags)
+      (cc Cond))))
+
+(decl cond_br (MachLabel MachLabel Cond) ConsumesFlags)
+(rule (cond_br taken not_taken cond)
+  (ConsumesFlags.ConsumesFlagsSideEffect (MInst.CondBr taken not_taken cond)))
+
+(decl trap_if (Cond TrapCode) ConsumesFlags)
+(rule (trap_if cond tc)
+  (ConsumesFlags.ConsumesFlagsSideEffect (MInst.TrapIf cond tc)))
+
+;; Unconditional jump.
+(decl jump_to (MachLabel) SideEffectNoResult)
+(rule (jump_to label) (SideEffectNoResult.Inst (MInst.Jump label)))
+
+;; Misc.
+(decl udf (TrapCode) SideEffectNoResult)
+(rule (udf tc) (SideEffectNoResult.Inst (MInst.Udf tc)))
+
+(decl bkpt () SideEffectNoResult)
+(rule (bkpt) (SideEffectNoResult.Inst (MInst.Bkpt)))
+
+(decl arm_fence () SideEffectNoResult)
+(rule (arm_fence) (SideEffectNoResult.Inst (MInst.Fence)))
+
+(decl load_ext_name (BoxExternalName i32 RelocDistance) Reg)
+(rule (load_ext_name name offset (RelocDistance.Far))
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.LoadExtName rd name offset))))
+    rd))
+(rule (load_ext_name name offset (RelocDistance.Near))
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.LoadExtNameNear rd name offset))))
+    rd))
+
+(decl label_address (MachLabel) Reg)
+(rule (label_address label)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.LabelAddress rd label))))
+    rd))
+
+(decl mov_from_preg (PReg) Reg)
+(rule (mov_from_preg rm)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.MovFromPReg rd rm))))
+    rd))
+
+(decl arm_sequence_point () SideEffectNoResult)
+(rule (arm_sequence_point) (SideEffectNoResult.Inst (MInst.SequencePoint)))
+
+;;;; NEON helpers ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(decl pure has_neon () bool)
+(extern constructor has_neon has_neon)
+
+(decl pure has_armv8 () bool)
+(extern constructor has_armv8 has_armv8)
+
+(decl temp_vec () WritableReg)
+(rule (temp_vec) (temp_writable_reg $I8X16))
+
+;; The NEON size code (0 = 8-bit, ..., 3 = 64-bit) of a vector's lanes.
+(decl pure vec_size (Type) u8)
+(extern constructor vec_size vec_size)
+
+(decl vec_rrr (VecAluOp u8 Reg Reg) Reg)
+(rule (vec_rrr op size rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecRRR op size rd rn rm))))
+    rd))
+
+(decl vec_rr (VecMiscOp u8 Reg) Reg)
+(rule (vec_rr op size rn)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecRR op size rd rn))))
+    rd))
+
+(decl vec_shift_imm (VecShiftOp u8 Reg u8) Reg)
+(rule (vec_shift_imm op size rn amt)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecShiftImm op size rd rn amt))))
+    rd))
+
+(decl vec_sra_self (u8 Reg u8) Reg)
+(rule (vec_sra_self size rn amt)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecSraSelf size rd rn amt))))
+    rd))
+
+(decl vec_bsl (Reg Reg Reg) Reg)
+(rule (vec_bsl mask rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecBsl rd mask rn rm))))
+    rd))
+
+(decl vec_narrow (VecNarrowOp u8 Reg Reg) Reg)
+(rule (vec_narrow op size rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecNarrow op size rd rn rm))))
+    rd))
+
+(decl vec_widen (bool bool u8 Reg) Reg)
+(rule (vec_widen signed high size rn)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecWiden signed high size rd rn))))
+    rd))
+
+(decl vec_mul_long (bool bool u8 Reg Reg) Reg)
+(rule (vec_mul_long signed high size rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecMulLong signed high size rd rn rm))))
+    rd))
+
+(decl vec_pairwise (VecAluOp u8 Reg Reg) Reg)
+(rule (vec_pairwise op size rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecPairwise op size rd rn rm))))
+    rd))
+
+(decl vec_dup (u8 Reg) Reg)
+(rule (vec_dup size rn)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecDup size rd rn))))
+    rd))
+
+(decl vec_dup_lane (u8 Reg u8) Reg)
+(rule (vec_dup_lane size rn lane)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecDupLane size rd rn lane))))
+    rd))
+
+(decl vec_mov_to_lane (u8 Reg Reg u8) Reg)
+(rule (vec_mov_to_lane size ri rn lane)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecMovToLane size rd ri rn lane))))
+    rd))
+
+(decl vec_mov_from_lane (u8 bool Reg u8) Reg)
+(rule (vec_mov_from_lane size signed rn lane)
+  (let ((rd WritableReg (temp_i32))
+        (_ Unit (emit (MInst.VecMovFromLane size signed rd rn lane))))
+    rd))
+
+(decl vec_from_gprs (Reg Reg Reg Reg) Reg)
+(rule (vec_from_gprs r0 r1 r2 r3)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecFromGprs rd r0 r1 r2 r3))))
+    rd))
+
+(decl vec_to_fpu (Reg u8) Reg)
+(rule (vec_to_fpu rn half)
+  (let ((rd WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecToFpu rd rn half))))
+    rd))
+
+(decl vec_from_fpu (Reg Reg u8) Reg)
+(rule (vec_from_fpu ri rn half)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecFromFpu rd ri rn half))))
+    rd))
+
+(decl vec_to_fpu32 (Reg u8) Reg)
+(rule (vec_to_fpu32 rn lane)
+  (let ((rd WritableReg (temp_f64))
+        (tmp WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecToFpu32 rd rn lane tmp))))
+    rd))
+
+(decl vec_from_fpu32 (Reg Reg u8) Reg)
+(rule (vec_from_fpu32 ri rn lane)
+  (let ((rd WritableReg (temp_vec))
+        (tmp WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecFromFpu32 rd ri rn lane tmp))))
+    rd))
+
+(decl vec_load_low (u8 bool AMode MemFlagsData) Reg)
+(rule (vec_load_low size zero_rest mem flags)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecLoadLow size zero_rest rd mem flags))))
+    rd))
+
+(decl vec_load_lane (u8 Reg u8 AMode MemFlagsData) Reg)
+(rule (vec_load_lane size ri lane mem flags)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecLoadLane size rd ri lane mem flags))))
+    rd))
+
+(decl vec_store_lane (u8 Reg u8 AMode MemFlagsData) SideEffectNoResult)
+(rule (vec_store_lane size rt lane mem flags)
+  (SideEffectNoResult.Inst (MInst.VecStoreLane size rt lane mem flags)))
+
+(decl vec_load_splat (u8 AMode MemFlagsData) Reg)
+(rule (vec_load_splat size mem flags)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecLoadSplat size rd mem flags))))
+    rd))
+
+(decl vec_load (AMode MemFlagsData) Reg)
+(rule (vec_load mem flags)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecLoad rd mem flags))))
+    rd))
+
+(decl vec_store (Reg AMode MemFlagsData) SideEffectNoResult)
+(rule (vec_store rt mem flags)
+  (SideEffectNoResult.Inst (MInst.VecStore rt mem flags)))
+
+(decl vec_ext (Reg Reg u8) Reg)
+(rule (vec_ext rn rm imm)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecExt rd rn rm imm))))
+    rd))
+
+(decl vec_tbl1 (Reg Reg) Reg)
+(rule (vec_tbl1 tbl idx)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecTbl rd tbl (option_reg_none) idx))))
+    rd))
+
+(decl vec_tbl2 (Reg Reg Reg) Reg)
+(rule (vec_tbl2 tbl1 tbl2 idx)
+  (let ((rd WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecTbl rd tbl1 (option_reg_some tbl2) idx))))
+    rd))
+
+(decl option_reg_none () OptionReg)
+(extern constructor option_reg_none option_reg_none)
+
+(decl option_reg_some (Reg) OptionReg)
+(extern constructor option_reg_some option_reg_some)
+
+(decl vec_fpu_rrr (FpuOp2 FpuSize Reg Reg) Reg)
+(rule (vec_fpu_rrr op size rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (t1 WritableReg (temp_f64))
+        (t2 WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecFpuRRR op size rd rn rm t1 t2))))
+    rd))
+
+(decl vec_fpu_rr (FpuOp1 FpuSize Reg) Reg)
+(rule (vec_fpu_rr op size rn)
+  (let ((rd WritableReg (temp_vec))
+        (t1 WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecFpuRR op size rd rn t1))))
+    rd))
+
+(decl vec_fpu_fma (FpuSize Reg Reg Reg) Reg)
+(rule (vec_fpu_fma size ra rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (t1 WritableReg (temp_f64))
+        (t2 WritableReg (temp_f64))
+        (t3 WritableReg (temp_f64))
+        (_ Unit (emit (MInst.VecFpuFma size rd ra rn rm t1 t2 t3))))
+    rd))
+
+(decl vec_fpu_cmp (FloatCC FpuSize Reg Reg) Reg)
+(rule 1 (vec_fpu_cmp cc (FpuSize.F32) rn rm)
+  (if-let true (vec_cmp_f32_supported cc))
+  (let ((rd WritableReg (temp_vec))
+        (ta WritableReg (temp_vec))
+        (tb WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecCmpF32 cc rd rn rm ta tb))))
+    rd))
+(rule 0 (vec_fpu_cmp cc size rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (t1 WritableReg (temp_f64))
+        (t2 WritableReg (temp_f64))
+        (g WritableReg (temp_i32))
+        (_ Unit (emit (MInst.VecFpuCmp cc size rd rn rm t1 t2 g))))
+    rd))
+
+(decl popcnt_neon (Reg Reg bool) Reg)
+(rule (popcnt_neon lo hi is64)
+  (let ((rd WritableReg (temp_i32))
+        (tmp WritableReg (temp_f64))
+        (_ Unit (emit (MInst.PopcntNeon rd lo hi tmp is64))))
+    rd))
+
+(decl vec_mul_i64 (Reg Reg) Reg)
+(rule (vec_mul_i64 rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (tb WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecMulI64 rd rn rm tb))))
+    rd))
+
+(decl vec_fpu_min_max (bool FpuSize Reg Reg) Reg)
+(rule 1 (vec_fpu_min_max is_min (FpuSize.F32) rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (ta WritableReg (temp_vec))
+        (tb WritableReg (temp_vec))
+        (_ Unit (emit (MInst.VecMinMaxF32 is_min rd rn rm ta tb))))
+    rd))
+(rule 0 (vec_fpu_min_max is_min size rn rm)
+  (let ((rd WritableReg (temp_vec))
+        (t1 WritableReg (temp_f64))
+        (t2 WritableReg (temp_f64))
+        (g WritableReg (temp_i32))
+        (_ Unit (emit (MInst.VecFpuMinMax is_min size rd rn rm t1 t2 g))))
+    rd))
+
+(decl vec_fpu_round (FpuRoundMode FpuSize Reg) Reg)
+(rule 1 (vec_fpu_round mode (FpuSize.F64) rn)
+  (let ((rd WritableReg (temp_vec))
+        (qa WritableReg (temp_vec))
+        (qb WritableReg (temp_vec))
+        (qc WritableReg (temp_vec))
+        (t WritableReg (temp_f64))
+        (g WritableReg (temp_i32))
+        (_ Unit (emit (MInst.VecRoundF64 mode rd rn qa qb qc t g))))
+    rd))
+(rule 1 (vec_fpu_round mode (FpuSize.F32) rn)
+  (let ((rd WritableReg (temp_vec))
+        (qa WritableReg (temp_vec))
+        (qb WritableReg (temp_vec))
+        (t1 WritableReg (temp_f64))
+        (t2 WritableReg (temp_f64))
+        (g WritableReg (temp_i32))
+        (_ Unit (emit (MInst.VecRoundF32 mode rd rn qa qb t1 t2 g))))
+    rd))
+(rule 0 (vec_fpu_round mode size rn)
+  (let ((rd WritableReg (temp_vec))
+        (t1 WritableReg (temp_f64))
+        (t2 WritableReg (temp_f64))
+        (t3 WritableReg (temp_f64))
+        (g1 WritableReg (temp_i32))
+        (g2 WritableReg (temp_i32))
+        (_ Unit (emit (MInst.VecFpuRound mode size rd rn t1 t2 t3 g1 g2))))
+    rd))
+
+;; Libcalls used by lowerings.
+(type LibCall extern
+  (enum
+    FmaF32
+    FmaF64))
+
+;; Call a three-argument libcall.
+(decl libcall_3 (LibCall Reg Reg Reg) Reg)
+(extern constructor libcall_3 libcall_3)

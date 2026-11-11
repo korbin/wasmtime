@@ -65,7 +65,7 @@ pub unsafe fn decommit_pages(iov: &[iovec]) -> io::Result<()> {
         unsafe {
             cfg_select! {
                 target_os = "linux" => {
-                    use rustix::mm::{madvise, Advice};
+                    use rustix::mm::{Advice, madvise};
 
                     // On Linux, this is enough to cause the kernel to initialize
                     // the pages to 0 on next access

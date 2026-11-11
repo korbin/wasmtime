@@ -562,6 +562,9 @@ impl<I: VCodeInst> VCodeBuilder<I> {
     /// Build the final VCode.
     pub fn build(mut self, mut vregs: VRegAllocator<I>) -> VCode<I> {
         self.vcode.vreg_types = take(&mut vregs.vreg_types);
+        // This may change the `MachineEnv`, so do it before collecting
+        // operands, which consults it.
+        self.vcode.abi.set_vreg_classes(vregs.classes);
 
         if self.direction == VCodeBuildDirection::Backward {
             self.reverse_and_finalize(&vregs);
@@ -1706,6 +1709,10 @@ pub struct VRegAllocator<I> {
     /// lowering rules) or some ABI code.
     deferred_error: Option<CodegenError>,
 
+    /// Which register classes (indexed by `RegClass as usize`) have had
+    /// vregs allocated.
+    classes: [bool; 3],
+
     /// The type of instruction that this allocator makes registers for.
     _inst: core::marker::PhantomData<I>,
 }
@@ -1720,6 +1727,7 @@ impl<I: VCodeInst> VRegAllocator<I> {
             vreg_types,
             vreg_aliases: FxHashMap::with_capacity_and_hasher(capacity, Default::default()),
             deferred_error: None,
+            classes: [false; 3],
             _inst: core::marker::PhantomData::default(),
         }
     }
@@ -1757,6 +1765,7 @@ impl<I: VCodeInst> VRegAllocator<I> {
             let vreg = reg.to_virtual_reg().unwrap();
             debug_assert_eq!(self.vreg_types.len(), vreg.index());
             self.vreg_types.push(reg_ty);
+            self.classes[reg.class() as usize] = true;
         }
 
         Ok(regs)

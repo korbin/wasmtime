@@ -346,6 +346,10 @@ pub struct MachBuffer<I: VCodeInst> {
     pending_fixup_records: SmallVec<[MachLabelFixup<I>; 16]>,
     /// The nearest upcoming deadline for entries in `pending_fixup_records`.
     pending_fixup_deadline: CodeOffset,
+    /// A lower bound on the deadlines of all fixups (pending or not) whose
+    /// label uses support veneers; used when
+    /// `LabelUse::PRECISE_ISLAND_VENEER_ESTIMATE` is set.
+    veneer_fixup_deadline: CodeOffset,
     /// Fixups that must be performed after all code is emitted.
     fixup_records: BinaryHeap<MachLabelFixup<I>>,
     /// Latest branches, to facilitate in-place editing for better fallthrough
@@ -579,6 +583,7 @@ impl<I: VCodeInst> MachBuffer<I> {
             pending_traps: SmallVec::new(),
             pending_fixup_records: SmallVec::new(),
             pending_fixup_deadline: u32::MAX,
+            veneer_fixup_deadline: u32::MAX,
             fixup_records: Default::default(),
             latest_branches: SmallVec::new(),
             labels_at_tail: SmallVec::new(),
@@ -859,6 +864,9 @@ impl<I: VCodeInst> MachBuffer<I> {
             // extra space taken by aligning an island.
             .min(fixup.deadline() - I::LabelUse::ALIGN);
         trace!("pending_fixup_deadline = {}", self.pending_fixup_deadline);
+        if kind.supports_veneer() {
+            self.veneer_fixup_deadline = self.veneer_fixup_deadline.min(fixup.deadline());
+        }
         self.pending_fixup_records.push(fixup);
 
         // Post-invariant: no mutations to branches/labels data structures.
@@ -1390,10 +1398,23 @@ impl<I: VCodeInst> MachBuffer<I> {
         // information about it as we go along.
         let max_veneer_count =
             u32::try_from(self.fixup_records.len() + self.pending_fixup_records.len()).unwrap();
-        let island_worst_case_size = max_veneer_count
-            .saturating_mul(I::LabelUse::worst_case_veneer_size())
-            + self.pending_constants_size
-            + (self.pending_traps.len() * I::TRAP_OPCODE.len()) as u32;
+        let veneers_size = max_veneer_count.saturating_mul(I::LabelUse::worst_case_veneer_size());
+        let traps_size = (self.pending_traps.len() * I::TRAP_OPCODE.len()) as u32;
+        if I::LabelUse::PRECISE_ISLAND_VENEER_ESTIMATE {
+            // Veneers are only emitted for fixups with deadlines before the
+            // island's (forced) end: if even the pessimistic end is before
+            // every veneer-capable fixup's deadline, no veneers are needed.
+            let end_without_veneers = self
+                .cur_offset()
+                .saturating_add(distance)
+                .saturating_add(traps_size)
+                .saturating_add(self.pending_constants_worst_case_size());
+            if self.veneer_fixup_deadline > end_without_veneers.saturating_add(veneers_size) {
+                return end_without_veneers;
+            }
+            return end_without_veneers.saturating_add(veneers_size);
+        }
+        let island_worst_case_size = veneers_size + self.pending_constants_size + traps_size;
         self.cur_offset()
             .saturating_add(distance)
             .saturating_add(island_worst_case_size)
@@ -1495,9 +1516,59 @@ impl<I: VCodeInst> MachBuffer<I> {
 
         // Now emit pending traps and constants.
         //
-        // Note that traps are placed first since this typically happens at the
-        // end of the function and for disassemblers we try to keep all the code
-        // contiguously together.
+        // Note that traps are normally placed first since this typically
+        // happens at the end of the function and for disassemblers we try to
+        // keep all the code contiguously together. However, constants may be
+        // referenced with a short range (e.g. arm32's `vldr`, +/- 1 KiB): if
+        // placing the traps first could push a constant past the deadline of
+        // a pending reference, place the constants first.
+        let traps_size = (self.pending_traps.len() * I::TRAP_OPCODE.len()) as u32;
+        let constants_worst_case_end = self
+            .cur_offset()
+            .saturating_add(traps_size)
+            .saturating_add(self.pending_constants_worst_case_size());
+        let constants_first = self
+            .fixup_records
+            .peek()
+            .is_some_and(|fixup| fixup.deadline() < constants_worst_case_end);
+        if constants_first {
+            self.emit_pending_constants(ctrl_plane);
+            self.emit_pending_traps(ctrl_plane);
+        } else {
+            self.emit_pending_traps(ctrl_plane);
+            self.emit_pending_constants(ctrl_plane);
+        }
+
+        // Recompute the bound on veneer-capable fixups' deadlines now that
+        // the handled fixups are gone.
+        self.veneer_fixup_deadline = self
+            .fixup_records
+            .iter()
+            .chain(self.pending_fixup_records.iter())
+            .filter(|f| f.kind.supports_veneer())
+            .map(|f| f.deadline())
+            .min()
+            .unwrap_or(u32::MAX);
+
+        // The traps and constants just emitted may define the labels of
+        // fixups that were deferred above. Apply those now: otherwise a
+        // short-range reference to a constant would keep its deadline and
+        // immediately force another (empty) island.
+        while let Some(fixup) = self.fixup_records.peek() {
+            if self.resolve_label_offset(fixup.label) == UNKNOWN_LABEL_OFFSET {
+                break;
+            }
+            let fixup = self.fixup_records.pop().unwrap();
+            self.handle_fixup(fixup, force_veneers, forced_threshold);
+        }
+
+        if let Some(loc) = cur_loc {
+            self.start_srcloc(loc);
+        }
+    }
+
+    /// Emit all pending deferred traps.
+    fn emit_pending_traps(&mut self, ctrl_plane: &mut ControlPlane) {
         trace!("emitting pending traps: {:?}", self.pending_traps);
         for MachLabelTrap { label, code, loc } in mem::take(&mut self.pending_traps) {
             // If this trap has source information associated with it then
@@ -1513,7 +1584,10 @@ impl<I: VCodeInst> MachBuffer<I> {
                 self.end_srcloc();
             }
         }
+    }
 
+    /// Emit all pending constants.
+    fn emit_pending_constants(&mut self, ctrl_plane: &mut ControlPlane) {
         trace!("emitting pending constants: {:?}", self.pending_constants);
         for constant in mem::take(&mut self.pending_constants) {
             let MachBufferConstant { align, size, .. } = self.constants[constant];
@@ -1523,10 +1597,18 @@ impl<I: VCodeInst> MachBuffer<I> {
             self.used_constants.push((constant, self.cur_offset()));
             self.get_appended_space(size);
         }
+    }
 
-        if let Some(loc) = cur_loc {
-            self.start_srcloc(loc);
-        }
+    /// An upper bound on the space needed to emit the pending constants,
+    /// including alignment padding.
+    fn pending_constants_worst_case_size(&self) -> CodeOffset {
+        self.pending_constants
+            .iter()
+            .map(|c| {
+                let MachBufferConstant { align, size, .. } = self.constants[*c];
+                u32::try_from(size).unwrap() + align.saturating_sub(I::LabelUse::ALIGN)
+            })
+            .sum()
     }
 
     fn should_apply_fixup(&self, fixup: &MachLabelFixup<I>, forced_threshold: CodeOffset) -> bool {

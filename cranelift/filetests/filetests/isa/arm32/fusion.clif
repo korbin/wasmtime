@@ -1,0 +1,132 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+function %add_shifted(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iconst.i32 2
+    v3 = ishl v1, v2
+    v4 = iadd v0, v3
+    return v4
+}
+
+; VCode:
+; block0:
+;   add r0, r0, r1, lsl #2
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, r1, lsl #2
+;   bx lr
+
+function %mla(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = imul v0, v1
+    v4 = iadd v3, v2
+    return v4
+}
+
+; VCode:
+; block0:
+;   mla r0, r0, r1, r2
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mla r0, r0, r1, r2
+;   bx lr
+
+function %mls(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = imul v0, v1
+    v4 = isub v2, v3
+    return v4
+}
+
+; VCode:
+; block0:
+;   mls r0, r0, r1, r2
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mls r0, r0, r1, r2
+;   bx lr
+
+function %bic(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = bnot v1
+    v3 = band v0, v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   bic r0, r0, r1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bic r0, r0, r1
+;   bx lr
+
+function %cmn(i32) -> i8 {
+block0(v0: i32):
+    v1 = iconst.i32 -5
+    v2 = icmp slt v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   cmn r0, #5
+;   cset r0, lt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmn r0, #5
+;   mov r0, #0
+;   movlt r0, #1
+;   bx lr
+
+function %cmp_int_min(i32) -> i8 {
+block0(v0: i32):
+    v1 = iconst.i32 0x80000000
+    v2 = icmp slt v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   cmp r0, #2147483648
+;   cset r0, lt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, #0x80000000
+;   mov r0, #0
+;   movlt r0, #1
+;   bx lr
+
+function %load_indexed(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iconst.i32 2
+    v3 = ishl v1, v2
+    v4 = iadd v0, v3
+    v5 = load.i32 v4
+    return v5
+}
+
+; VCode:
+; block0:
+;   ldr r0, [r0, r1, lsl #2]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ldr r0, [r0, r1, lsl #2] ; trap: heap_oob
+;   bx lr
+

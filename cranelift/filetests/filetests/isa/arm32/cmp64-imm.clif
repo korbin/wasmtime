@@ -1,0 +1,165 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+;; `i64.eqz`: a single `orrs`.
+function %eqz(i64) -> i8 {
+block0(v0: i64):
+    v1 = iconst.i64 0
+    v2 = icmp eq v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   orrs r3, r0, r1
+;   cset r0, eq
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   orrs r3, r0, r1
+;   mov r0, #0
+;   moveq r0, #1
+;   bx lr
+
+function %ne_imm(i64) -> i8 {
+block0(v0: i64):
+    v1 = iconst.i64 0x100000ff
+    v2 = icmp ne v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mov r3, r1
+;   movw r1, #255
+;   movt r1, #4096
+;   mov r2, #0
+;   cmp r3, r2
+;   cmpeq r0, r1
+;   cset r0, ne
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mov r3, r1
+;   movw r1, #0xff
+;   movt r1, #0x1000
+;   mov r2, #0
+;   cmp r3, r2
+;   cmpeq r0, r1
+;   mov r0, #0
+;   movne r0, #1
+;   bx lr
+
+;; Ordered comparisons against a constant use `cmp`/`sbcs` immediates.
+function %slt_imm(i64) -> i8 {
+block0(v0: i64):
+    v1 = iconst.i64 100
+    v2 = icmp slt v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   cmp r0, #100
+;   sbcs r0, r1, #0
+;   cset r0, lt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, #0x64
+;   sbcs r0, r1, #0
+;   mov r0, #0
+;   movlt r0, #1
+;   bx lr
+
+;; `x > 100` is compared as `x >= 101`.
+function %sgt_imm_br(i64) -> i32 {
+block0(v0: i64):
+    v1 = iconst.i64 100
+    v2 = icmp sgt v0, v1
+    brif v2, block1, block2
+block1:
+    v3 = iconst.i32 1
+    return v3
+block2:
+    v4 = iconst.i32 2
+    return v4
+}
+
+; VCode:
+; block0:
+;   cmp r0, #101
+;   sbcs r0, r1, #0
+;   bge label2 ; b label1
+; block1:
+;   mov r0, #2
+;   bx lr
+; block2:
+;   mov r0, #1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, #0x65
+;   sbcs r0, r1, #0
+;   bge #0x14
+; block1: ; offset 0xc
+;   mov r0, #2
+;   bx lr
+; block2: ; offset 0x14
+;   mov r0, #1
+;   bx lr
+
+function %ule_imm(i64) -> i8 {
+block0(v0: i64):
+    v1 = iconst.i64 0xff00000000
+    v2 = icmp ule v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   cmp r0, #1
+;   sbcs r0, r1, #255
+;   cset r0, lo
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, #1
+;   sbcs r0, r1, #0xff
+;   mov r0, #0
+;   movlo r0, #1
+;   bx lr
+
+;; `x <= i64::MAX` can't be compared as `x < i64::MAX + 1`.
+function %sle_max(i64) -> i8 {
+block0(v0: i64):
+    v1 = iconst.i64 0x7fffffffffffffff
+    v2 = icmp sle v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mvn r3, #0
+;   mvn r2, #2147483648
+;   cmp r3, r0
+;   sbcs r0, r2, r1
+;   cset r0, ge
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mvn r3, #0
+;   mvn r2, #0x80000000
+;   cmp r3, r0
+;   sbcs r0, r2, r1
+;   mov r0, #0
+;   movge r0, #1
+;   bx lr
+

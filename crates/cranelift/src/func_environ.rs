@@ -6277,6 +6277,15 @@ impl FuncEnvironment<'_> {
         }
     }
 
+    /// Whether the target supports 128-bit integer values. 32-bit ARM does
+    /// not, since values are limited to two of its 32-bit registers.
+    pub fn supports_i128(&self) -> bool {
+        !matches!(
+            self.isa.triple().architecture,
+            target_lexicon::Architecture::Arm(_)
+        )
+    }
+
     pub fn isa(&self) -> &dyn TargetIsa {
         &*self.isa
     }

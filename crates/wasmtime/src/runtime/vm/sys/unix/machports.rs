@@ -320,12 +320,15 @@ unsafe fn handle_exception(request: &mut ExceptionRequest) -> bool {
 
             let thread_state_flavor = x86_THREAD_STATE64;
 
-            let get_pc_and_fp = |state: &ThreadState| (
-                state.__rip as *const u8,
-                state.__rbp as usize,
-            );
+            let get_pc_and_fp =
+                |state: &ThreadState| (state.__rip as *const u8, state.__rbp as usize);
 
-            let resume = |state: &mut ThreadState, pc: usize, fp: usize, fault1: usize, fault2: usize, trap: CompiledTrap| {
+            let resume = |state: &mut ThreadState,
+                          pc: usize,
+                          fp: usize,
+                          fault1: usize,
+                          fault2: usize,
+                          trap: CompiledTrap| {
                 // The x86_64 ABI requires a 16-byte stack alignment for
                 // functions, so typically we'll be 16-byte aligned. In this
                 // case we simulate a `call` instruction by decrementing the
@@ -365,12 +368,15 @@ unsafe fn handle_exception(request: &mut ExceptionRequest) -> bool {
 
             let thread_state_flavor = ARM_THREAD_STATE64;
 
-            let get_pc_and_fp = |state: &ThreadState| (
-                state.__pc as *const u8,
-                state.__fp as usize,
-            );
+            let get_pc_and_fp =
+                |state: &ThreadState| (state.__pc as *const u8, state.__fp as usize);
 
-            let resume = |state: &mut ThreadState, pc: usize, fp: usize, fault1: usize, fault2: usize, trap: CompiledTrap| {
+            let resume = |state: &mut ThreadState,
+                          pc: usize,
+                          fp: usize,
+                          fault1: usize,
+                          fault2: usize,
+                          trap: CompiledTrap| {
                 // Clobber LR with the faulting PC, so unwinding resumes at the
                 // faulting instruction. The previous value of LR has been saved
                 // by the callee (in Cranelift generated code), so no need to

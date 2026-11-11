@@ -173,6 +173,9 @@ pub(crate) fn create_unwind_info_from_insts<MR: RegisterMapper<Reg>>(
 
     let mut cfa_offset = 0;
     let mut clobber_offset_to_cfa = 0;
+    // On targets with a frame pointer, the SP-relative CFA offset after the
+    // frame registers are pushed and before the frame pointer is set up.
+    let mut sp_cfa_offset: Option<u32> = None;
     for &(instruction_offset, ref inst) in insts {
         match inst {
             &UnwindInst::PushFrameRegs {
@@ -184,6 +187,7 @@ pub(crate) fn create_unwind_info_from_insts<MR: RegisterMapper<Reg>>(
                     instruction_offset,
                     CallFrameInstruction::CfaOffset(offset_upward_to_caller_sp as i32),
                 ));
+                sp_cfa_offset = Some(offset_upward_to_caller_sp);
                 // Note that we saved the old FP value on the stack.  Use of this
                 // operation implies that the target defines a FP register.
                 instructions.push((
@@ -215,9 +219,21 @@ pub(crate) fn create_unwind_info_from_insts<MR: RegisterMapper<Reg>>(
                 // been set to the current SP, so we do not need to change the
                 // offset, only the register.  (This is done only if the target
                 // defines a frame pointer register.)
+                // If the stack pointer moved further before the frame pointer
+                // was set up (e.g. callee-saved registers pushed along with
+                // the frame registers), the offset changes as well.
                 if let Some(fp) = mr.fp() {
-                    instructions.push((instruction_offset, CallFrameInstruction::CfaRegister(fp)));
+                    if sp_cfa_offset.is_some_and(|o| o != offset_upward_to_caller_sp) {
+                        instructions.push((
+                            instruction_offset,
+                            CallFrameInstruction::Cfa(fp, offset_upward_to_caller_sp as i32),
+                        ));
+                    } else {
+                        instructions
+                            .push((instruction_offset, CallFrameInstruction::CfaRegister(fp)));
+                    }
                 }
+                sp_cfa_offset = None;
                 // Record initial CFA offset.  This will be used with later
                 // StackAlloc calls if we do not have a frame pointer.
                 cfa_offset = offset_upward_to_caller_sp;
@@ -233,6 +249,14 @@ pub(crate) fn create_unwind_info_from_insts<MR: RegisterMapper<Reg>>(
                     instructions.push((
                         instruction_offset,
                         CallFrameInstruction::CfaOffset(cfa_offset as i32),
+                    ));
+                } else if let Some(o) = sp_cfa_offset.as_mut() {
+                    // The CFA is still defined relative to SP, before the
+                    // frame pointer is set up.
+                    *o += size;
+                    instructions.push((
+                        instruction_offset,
+                        CallFrameInstruction::CfaOffset(*o as i32),
                     ));
                 }
             }

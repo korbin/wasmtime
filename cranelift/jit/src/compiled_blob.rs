@@ -54,9 +54,10 @@ impl CompiledBlob {
         let mut got_count = 0;
         for reloc in &relocs {
             match reloc.kind {
-                Reloc::Arm64Call | Reloc::X86CallPCRel4 | Reloc::X86CallPLTRel4 => {
-                    veneer_count += 1
-                }
+                Reloc::Arm32Call
+                | Reloc::Arm64Call
+                | Reloc::X86CallPCRel4
+                | Reloc::X86CallPLTRel4 => veneer_count += 1,
                 Reloc::X86GOTPCRel4 => got_count += 1,
                 _ => {}
             }
@@ -312,6 +313,42 @@ impl CompiledBlob {
                         let imm26 = (diff as u32) << chop >> chop;
                         unsafe { modify_inst32(iptr, |inst| inst | imm26) };
                     }
+                }
+                Reloc::Arm32Call => {
+                    // A `bl`/`b` instruction whose 24-bit word offset is
+                    // relative to the instruction address plus 8.
+                    let what = relocation_target_addr(name, addend);
+                    let iptr = at as *mut u32;
+                    let encode = |target: isize| -> Option<u32> {
+                        let diff = (target - (at as isize) - 8) >> 2;
+                        if (diff >> 23 == -1) || (diff >> 23 == 0) {
+                            Some((diff as u32) & 0x00ff_ffff)
+                        } else {
+                            None
+                        }
+                    };
+                    let imm24 = match encode(what as isize) {
+                        Some(imm24) => imm24,
+                        None => {
+                            // Out of range: go through a veneer at the end of
+                            // the function: `ldr pc, [pc, #-4]` followed by the
+                            // absolute target address.
+                            let veneer_idx = next_veneer_idx;
+                            next_veneer_idx += 1;
+                            assert!(veneer_idx < self.veneer_count);
+                            let veneer =
+                                unsafe { self.ptr.byte_add(self.size + veneer_idx * VENEER_SIZE) };
+                            unsafe {
+                                write_unaligned(veneer.cast::<u32>(), 0xe51f_f004);
+                                write_unaligned(
+                                    veneer.byte_add(4).cast::<u32>(),
+                                    u32::try_from(what).unwrap(),
+                                );
+                            }
+                            encode(veneer as isize).expect("veneer out of range")
+                        }
+                    };
+                    unsafe { modify_inst32(iptr, |inst| (inst & 0xff00_0000) | imm24) };
                 }
                 Reloc::Aarch64AdrGotPage21 => {
                     panic!("GOT relocation shouldn't be generated when !is_pic");

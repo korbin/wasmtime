@@ -6,7 +6,10 @@ pub fn engine() -> Option<Engine> {
     config.shared_memory(true);
     match Engine::new(&config) {
         Ok(engine) => {
-            assert!(cfg!(target_pointer_width = "64"));
+            // Shared memories are supported on 64-bit hosts, and on 32-bit
+            // hosts with a native compiler backend (Pulley doesn't support
+            // threads).
+            assert!(cfg!(target_pointer_width = "64") || !engine.is_pulley());
             Some(engine)
         }
         Err(e) => {

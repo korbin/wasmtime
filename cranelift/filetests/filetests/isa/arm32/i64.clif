@@ -1,0 +1,310 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+function %iadd_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = iadd v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   adds r0, r0, r2
+;   adc r1, r1, r3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   adds r0, r0, r2
+;   adc r1, r1, r3
+;   bx lr
+
+function %isub_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = isub v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   subs r0, r0, r2
+;   sbc r1, r1, r3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   subs r0, r0, r2
+;   sbc r1, r1, r3
+;   bx lr
+
+function %imul_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = imul v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r5, r6, fp, lr}
+;   add fp, sp, #8
+; block0:
+;   umull r5, r6, r0, r2
+;   mla r0, r0, r3, r6
+;   mla r1, r1, r2, r0
+;   mov r0, r5
+;   pop {r5, r6, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r5, r6, fp, lr}
+;   add fp, sp, #8
+; block1: ; offset 0x8
+;   umull r5, r6, r0, r2
+;   mla r0, r0, r3, r6
+;   mla r1, r1, r2, r0
+;   mov r0, r5
+;   pop {r5, r6, fp, pc}
+
+function %ishl_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r10, fp, lr}
+;   add fp, sp, #4
+; block0:
+;   mov r10, r1
+;   mov lr, r0
+;   and r3, r2, #63
+;   lsl64 r0:r1, lr:r10, r3, tmp=r2
+;   pop {r10, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {sl, fp, lr}
+;   add fp, sp, #4
+; block1: ; offset 0x8
+;   mov sl, r1
+;   mov lr, r0
+;   and r3, r2, #0x3f
+;   rsb r2, r3, #0x20
+;   lsl r1, sl, r3
+;   orr r1, r1, lr, lsr r2
+;   sub r2, r3, #0x20
+;   orr r1, r1, lr, lsl r2
+;   lsl r0, lr, r3
+;   pop {sl, fp, pc}
+
+function %sshr_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = sshr v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r10, fp, lr}
+;   add fp, sp, #4
+; block0:
+;   mov r10, r1
+;   mov lr, r0
+;   and r3, r2, #63
+;   asr64 r0:r1, lr:r10, r3, tmp=r2
+;   pop {r10, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {sl, fp, lr}
+;   add fp, sp, #4
+; block1: ; offset 0x8
+;   mov sl, r1
+;   mov lr, r0
+;   and r3, r2, #0x3f
+;   rsb r2, r3, #0x20
+;   lsr r0, lr, r3
+;   orr r0, r0, sl, lsl r2
+;   subs r2, r3, #0x20
+;   asrpl r0, sl, r2
+;   asr r1, sl, r3
+;   pop {sl, fp, pc}
+
+function %icmp_slt_i64(i64, i64) -> i8 {
+block0(v0: i64, v1: i64):
+    v2 = icmp slt v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   cmp r0, r2
+;   sbcs r0, r1, r3
+;   cset r0, lt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, r2
+;   sbcs r0, r1, r3
+;   mov r0, #0
+;   movlt r0, #1
+;   bx lr
+
+function %icmp_ugt_i64(i64, i64) -> i8 {
+block0(v0: i64, v1: i64):
+    v2 = icmp ugt v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   cmp r1, r3
+;   cmpeq r0, r2
+;   cset r0, hi
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r1, r3
+;   cmpeq r0, r2
+;   mov r0, #0
+;   movhi r0, #1
+;   bx lr
+
+function %udiv_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = udiv v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r4, r5, r10, fp, lr}
+;   add fp, sp, #12
+; block0:
+;   mov r4, r0
+;   mov r5, r1
+;   orrs r0, r2, r3
+;   udfeq ; trap=int_divz
+;   udivmod64 r0:r1, r10:lr, r4:r5, r2:r3
+;   pop {r4, r5, r10, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, r5, sl, fp, lr}
+;   add fp, sp, #0xc
+; block1: ; offset 0x8
+;   mov r4, r0
+;   mov r5, r1
+;   orrs r0, r2, r3
+;   beq #0x74
+;   cmp r5, #0
+;   movne r1, r5
+;   movne r0, r4
+;   movne ip, #0x40
+;   moveq r1, r4
+;   moveq r0, #0
+;   moveq ip, #0x20
+;   mov sl, #0
+;   mov lr, #0
+;   adds r0, r0, r0
+;   adcs r1, r1, r1
+;   adcs sl, sl, sl
+;   adcs lr, lr, lr
+;   bhs #0x5c
+;   cmp lr, r3
+;   cmpeq sl, r2
+;   blo #0x68
+;   subs sl, sl, r2
+;   sbc lr, lr, r3
+;   orr r0, r0, #1
+;   subs ip, ip, #1
+;   bne #0x3c
+;   pop {r4, r5, sl, fp, pc}
+;   udf #0 ; trap: int_divz
+
+function %umulhi_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = umulhi v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r4, r5, r6, r8, fp, lr}
+;   add fp, sp, #16
+; block0:
+;   umull r6, r5, r0, r2
+;   mov r4, r0
+;   mov r8, #0
+;   mov r0, r8
+;   umaal r5, r0, r1, r2
+;   mov lr, #0
+;   mov r2, r4
+;   mov r4, lr
+;   umaal r5, r4, r2, r3
+;   mov r2, r1
+;   mov r1, r4
+;   umaal r0, r1, r2, r3
+;   pop {r4, r5, r6, r8, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, r5, r6, r8, fp, lr}
+;   add fp, sp, #0x10
+; block1: ; offset 0x8
+;   umull r6, r5, r0, r2
+;   mov r4, r0
+;   mov r8, #0
+;   mov r0, r8
+;   umaal r5, r0, r1, r2
+;   mov lr, #0
+;   mov r2, r4
+;   mov r4, lr
+;   umaal r5, r4, r2, r3
+;   mov r2, r1
+;   mov r1, r4
+;   umaal r0, r1, r2, r3
+;   pop {r4, r5, r6, r8, fp, pc}
+
+function %sextend_i64(i32) -> i64 {
+block0(v0: i32):
+    v1 = sextend.i64 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   asr r1, r0, #31
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   asr r1, r0, #0x1f
+;   bx lr
+
+function %i64_arg_alignment(i32, i64, i32, i64) -> i64 {
+block0(v0: i32, v1: i64, v2: i32, v3: i64):
+    v4 = iadd v1, v3
+    return v4
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+; block0:
+;   ldr r0, [sp, #16]
+;   ldr r1, [sp, #20]
+;   adds r0, r2, r0
+;   adc r1, r3, r1
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+; block1: ; offset 0x8
+;   ldr r0, [sp, #0x10]
+;   ldr r1, [sp, #0x14]
+;   adds r0, r2, r0
+;   adc r1, r3, r1
+;   pop {fp, pc}
+

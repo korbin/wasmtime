@@ -3324,3 +3324,57 @@ block0(v0: i32x4, v1: i32x4):
 ; check: v5 = bnot v1
 ; check: v6 = umax v0, v5
 ; check: return v6
+
+;; LLVM's wasm lowering of `u32::swap_bytes`:
+;; (((x ^ rotr(x, 16)) & 0xff00ff00) >> 8) ^ rotr(x, 8)
+function %bswap32_rotr_idiom(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 16
+    v2 = rotr v0, v1
+    v3 = bxor v0, v2
+    v4 = iconst.i32 0xff00ff00
+    v5 = band v3, v4
+    v6 = iconst.i32 8
+    v7 = ushr v5, v6
+    v8 = rotr v0, v6
+    v9 = bxor v7, v8
+    return v9
+}
+
+; check: v10 = bswap v0
+; check: return v10
+
+function %bswap32_rotr_idiom_swapped(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 16
+    v2 = rotr v0, v1
+    v3 = bxor v2, v0
+    v4 = iconst.i32 0xff00ff00
+    v5 = band v3, v4
+    v6 = iconst.i32 8
+    v7 = ushr v5, v6
+    v8 = rotr v0, v6
+    v9 = bxor v8, v7
+    return v9
+}
+
+; check: v10 = bswap v0
+; check: return v10
+
+;; Not a byte swap: wrong mask.
+function %bswap32_rotr_idiom_wrong_mask(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 16
+    v2 = rotr v0, v1
+    v3 = bxor v0, v2
+    v4 = iconst.i32 0x00ff00ff
+    v5 = band v3, v4
+    v6 = iconst.i32 8
+    v7 = ushr v5, v6
+    v8 = rotr v0, v6
+    v9 = bxor v7, v8
+    return v9
+}
+
+; check: v9 = bxor v7, v8
+; check: return v9

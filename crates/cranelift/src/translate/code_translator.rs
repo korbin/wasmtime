@@ -3421,6 +3421,35 @@ pub fn translate_operator(
             ));
         }
 
+        // Targets without 128-bit integers compute these from 64-bit halves.
+        Operator::I64MulWideS if !environ.supports_i128() => {
+            let (arg1, arg2) = environ.stacks.pop2();
+            let lo = builder.ins().imul(arg1, arg2);
+            let hi = builder.ins().smulhi(arg1, arg2);
+            environ.stacks.push2(lo, hi);
+        }
+        Operator::I64MulWideU if !environ.supports_i128() => {
+            let (arg1, arg2) = environ.stacks.pop2();
+            let lo = builder.ins().imul(arg1, arg2);
+            let hi = builder.ins().umulhi(arg1, arg2);
+            environ.stacks.push2(lo, hi);
+        }
+        Operator::I64Add128 if !environ.supports_i128() => {
+            let (a_lo, a_hi, b_lo, b_hi) = environ.stacks.pop4();
+            let (lo, carry) = builder.ins().uadd_overflow(a_lo, b_lo);
+            let carry = builder.ins().uextend(I64, carry);
+            let hi = builder.ins().iadd(a_hi, b_hi);
+            let hi = builder.ins().iadd(hi, carry);
+            environ.stacks.push2(lo, hi);
+        }
+        Operator::I64Sub128 if !environ.supports_i128() => {
+            let (a_lo, a_hi, b_lo, b_hi) = environ.stacks.pop4();
+            let (lo, borrow) = builder.ins().usub_overflow(a_lo, b_lo);
+            let borrow = builder.ins().uextend(I64, borrow);
+            let hi = builder.ins().isub(a_hi, b_hi);
+            let hi = builder.ins().isub(hi, borrow);
+            environ.stacks.push2(lo, hi);
+        }
         Operator::I64MulWideS => {
             let (arg1, arg2) = environ.stacks.pop2();
             let arg1 = builder.ins().sextend(I128, arg1);

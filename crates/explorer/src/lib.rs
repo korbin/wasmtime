@@ -220,6 +220,12 @@ fn annotate_asm(
                     .mode(capstone::arch::arm64::ArchMode::Arm)
                     .build()
                     .map_err(|e| wasmtime::format_err!("{e}"))?,
+                // 32-bit ARM code is in ARM (A32) state.
+                target_lexicon::Architecture::Arm(_) => capstone::Capstone::new()
+                    .arm()
+                    .mode(capstone::arch::arm::ArchMode::Arm)
+                    .build()
+                    .map_err(|e| wasmtime::format_err!("{e}"))?,
                 target_lexicon::Architecture::Riscv64(_) => capstone::Capstone::new()
                     .riscv()
                     .mode(capstone::arch::riscv::ArchMode::RiscV64)

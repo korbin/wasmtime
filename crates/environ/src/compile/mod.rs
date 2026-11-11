@@ -345,7 +345,10 @@ pub trait Compiler: Send + Sync {
         let (arch, flags) = match triple.architecture {
             X86_32(_) => (Architecture::I386, object::elf::FileFlags(0)),
             X86_64 => (Architecture::X86_64, object::elf::FileFlags(0)),
-            Arm(_) => (Architecture::Arm, object::elf::FileFlags(0)),
+            // Wasmtime artifacts are always ELF64, which can't describe
+            // 32-bit ARM, so use the AArch64 machine with a marker flag
+            // (similar to Pulley below).
+            Arm(_) => (Architecture::Aarch64, obj::EF_WASMTIME_ARM32),
             Aarch64(_) => (Architecture::Aarch64, object::elf::FileFlags(0)),
             S390x => (Architecture::S390x, object::elf::FileFlags(0)),
             Riscv64(_) => (Architecture::Riscv64, object::elf::FileFlags(0)),

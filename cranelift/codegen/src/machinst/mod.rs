@@ -472,6 +472,13 @@ pub trait MachInstLabelUse: Clone + Copy + Debug + Eq {
     fn veneer_size(self) -> CodeOffset;
     /// What's the largest possible veneer that may be generated?
     fn worst_case_veneer_size() -> CodeOffset;
+    /// Whether islands may be sized without veneers when no label use that
+    /// supports veneers is close to its deadline (otherwise every pending
+    /// label use is assumed to need a worst-case veneer). This suits targets
+    /// whose branches reach far beyond typical function sizes but which have
+    /// short-range constant references, for which the pessimistic estimate
+    /// would force an island right after nearly every constant reference.
+    const PRECISE_ISLAND_VENEER_ESTIMATE: bool = false;
     /// Generate a veneer. The given code-buffer slice is `self.veneer_size()`
     /// bytes long at offset `veneer_offset` in the buffer. The original
     /// label-use will be patched to refer to this veneer's offset.  A new

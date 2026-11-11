@@ -1,0 +1,150 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+function %brif_icmp(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = icmp ult v0, v1
+    brif v2, block1, block2
+block1:
+    return v0
+block2:
+    return v1
+}
+
+; VCode:
+; block0:
+;   cmp r0, r1
+;   blo label2 ; b label1
+; block1:
+;   mov r0, r1
+;   bx lr
+; block2:
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, r1
+;   blo #0x10
+; block1: ; offset 0x8
+;   mov r0, r1
+;   bx lr
+; block2: ; offset 0x10
+;   bx lr
+
+function %brif_i64(i64) -> i32 {
+block0(v0: i64):
+    brif v0, block1, block2
+block1:
+    v1 = iconst.i32 1
+    return v1
+block2:
+    v2 = iconst.i32 2
+    return v2
+}
+
+; VCode:
+; block0:
+;   orrs r0, r0, r1
+;   bne label2 ; b label1
+; block1:
+;   mov r0, #2
+;   bx lr
+; block2:
+;   mov r0, #1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   orrs r0, r0, r1
+;   bne #0x10
+; block1: ; offset 0x8
+;   mov r0, #2
+;   bx lr
+; block2: ; offset 0x10
+;   mov r0, #1
+;   bx lr
+
+function %br_table(i32) -> i32 {
+block0(v0: i32):
+    br_table v0, block3, [block1, block2]
+block1:
+    v1 = iconst.i32 1
+    return v1
+block2:
+    v2 = iconst.i32 2
+    return v2
+block3:
+    v3 = iconst.i32 3
+    return v3
+}
+
+; VCode:
+; block0:
+;   br_table r0, [label3, label2, label1]
+; block1:
+;   mov r0, #2
+;   bx lr
+; block2:
+;   mov r0, #1
+;   bx lr
+; block3:
+;   mov r0, #3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, #2
+;   bhs #0x28
+;   add pc, pc, r0, lsl #2
+;   udf #0
+;   b #0x20
+;   b #0x18
+; block1: ; offset 0x18
+;   mov r0, #2
+;   bx lr
+; block2: ; offset 0x20
+;   mov r0, #1
+;   bx lr
+; block3: ; offset 0x28
+;   mov r0, #3
+;   bx lr
+
+function %trapz(i32) {
+block0(v0: i32):
+    trapz v0, user1
+    return
+}
+
+; VCode:
+; block0:
+;   cmp r0, #0
+;   udfeq ; trap=user1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, #0
+;   beq #0xc
+;   bx lr
+;   udf #0 ; trap: user1
+
+function %uadd_overflow_trap(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = uadd_overflow_trap v0, v1, user1
+    return v2
+}
+
+; VCode:
+; block0:
+;   adds r0, r0, r1
+;   udfhs ; trap=user1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   adds r0, r0, r1
+;   bhs #0xc
+;   bx lr
+;   udf #0 ; trap: user1
+

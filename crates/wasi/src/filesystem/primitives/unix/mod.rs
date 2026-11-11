@@ -177,7 +177,6 @@ pub(crate) fn read_dir(
                 let file_type = cfg_select! {
                     target_os = "illumos" => rustix::fs::FileType::Unknown,
                     _ => entry.file_type(),
-
                 };
                 let file_type = FileType::Unix(file_type);
 

@@ -585,6 +585,13 @@ fn build_capstone(target: &target_lexicon::Triple) -> Result<capstone::Capstone>
             .detail(true)
             .build()
             .map_err(|e| format_err!("{e}"))?,
+        // 32-bit ARM code is in ARM (A32) state.
+        target_lexicon::Architecture::Arm(_) => capstone::Capstone::new()
+            .arm()
+            .mode(capstone::arch::arm::ArchMode::Arm)
+            .detail(true)
+            .build()
+            .map_err(|e| format_err!("{e}"))?,
         target_lexicon::Architecture::Riscv64(_) => capstone::Capstone::new()
             .riscv()
             .mode(capstone::arch::riscv::ArchMode::RiscV64)
@@ -987,6 +994,33 @@ mod test {
         // Verify block instructions have assembly text.
         assert!(blocks[0].instructions[0].assembly.contains("nop"));
         assert!(blocks[0].instructions[2].assembly.contains("jmp"));
+    }
+
+    #[test]
+    fn test_arm32_basic_blocks() {
+        // Block 0: mov r0, #0; cmp r0, #1; beq (next)
+        // Block 1: add r0, r0, #1; pop {fp, pc}
+        // Block 2: bx lr
+        let words: [u32; 6] = [
+            0xe3a0_0000,
+            0xe350_0001,
+            0x0a00_0000,
+            0xe280_0001,
+            0xe8bd_8800,
+            0xe12f_ff1e,
+        ];
+        let func_body: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let target: target_lexicon::Triple = "armv7-unknown-linux-gnueabihf".parse().unwrap();
+        let blocks =
+            build_basic_blocks(&func_body, 0x100, &[], &[], &BTreeMap::new(), &target).unwrap();
+        let sizes: Vec<usize> = blocks.iter().map(|b| b.instructions.len()).collect();
+        assert_eq!(sizes, [3, 2, 1]);
+        assert!(blocks[0].instructions[2].assembly.contains("beq"));
+        assert!(blocks[1].instructions[1].assembly.contains("pop"));
+        assert_eq!(
+            find_block_for_offset(&blocks, FunctionOffset(12)),
+            Some(BlockIndex(1))
+        );
     }
 
     #[test]

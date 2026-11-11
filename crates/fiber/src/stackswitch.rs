@@ -12,8 +12,8 @@ cfg_select! {
     }
     target_arch = "aarch64" => {
         mod aarch64;
-        pub(crate) use supported::*;
         pub(crate) use aarch64::*;
+        pub(crate) use supported::*;
     }
     target_arch = "x86_64" => {
         mod x86_64;
@@ -27,28 +27,32 @@ cfg_select! {
     }
     target_arch = "arm" => {
         mod arm;
-        pub(crate) use supported::*;
         pub(crate) use arm::*;
+        pub(crate) use supported::*;
     }
     target_arch = "s390x" => {
         mod s390x;
-        pub(crate) use supported::*;
         pub(crate) use s390x::*;
+        pub(crate) use supported::*;
     }
     target_arch = "riscv64" => {
         mod riscv64;
-        pub(crate) use supported::*;
         pub(crate) use riscv64::*;
-    }
-    all(target_arch = "riscv32", not(target_feature = "f"), not(target_feature = "v")) => {
-        mod riscv32imac;
         pub(crate) use supported::*;
+    }
+    all(
+        target_arch = "riscv32",
+        not(target_feature = "f"),
+        not(target_feature = "v")
+    ) => {
+        mod riscv32imac;
         pub(crate) use riscv32imac::*;
+        pub(crate) use supported::*;
     }
     target_arch = "loongarch64" => {
         mod loongarch64;
-        pub(crate) use supported::*;
         pub(crate) use loongarch64::*;
+        pub(crate) use supported::*;
     }
     feature = "custom" => {
         mod custom;

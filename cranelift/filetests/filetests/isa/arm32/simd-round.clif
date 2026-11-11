@@ -1,0 +1,208 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_neon
+
+;; Without `vrint` (ARMv8), f32x4 lanes are rounded by converting to integers
+;; and back with VFP, then fixed up with NEON.
+
+function %floor_f32x4(f32x4) -> f32x4 {
+block0(v0: f32x4):
+    v1 = floor v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vmov q11, q8
+;   vround_floor.f32x q10, q11 ; tmps q9, q8, d5, d6, r0
+;   vmov q8, q10
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vorr q11, q8, q8
+;   vmov.f64 d5, d22
+;   vmov.f64 d6, d23
+;   vmrs r0, fpscr
+;   bic ip, r0, #0xc00000
+;   orr ip, ip, #0x800000
+;   vmsr fpscr, ip
+;   vcvtr.s32.f32 s10, s10
+;   vcvt.f32.s32 s10, s10
+;   vcvtr.s32.f32 s11, s11
+;   vcvt.f32.s32 s11, s11
+;   vcvtr.s32.f32 s12, s12
+;   vcvt.f32.s32 s12, s12
+;   vcvtr.s32.f32 s13, s13
+;   vcvt.f32.s32 s13, s13
+;   vmsr fpscr, r0
+;   vmov.f64 d18, d5
+;   vmov.f64 d19, d6
+;   vmov.i32 q8, #0x80000000
+;   vbit q9, q11, q8
+;   vmov.i32 q8, #0x4b000000
+;   vacge.f32 q8, q11, q8
+;   vbit q9, q11, q8
+;   vceq.f32 q8, q11, q11
+;   vadd.f32 q10, q11, q11
+;   vbit q10, q9, q8
+;   vorr q8, q10, q10
+;   bx lr
+
+function %trunc_f32x4(f32x4) -> f32x4 {
+block0(v0: f32x4):
+    v1 = trunc v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vmov q11, q8
+;   vround_trunc.f32x q10, q11 ; tmps q9, q8, d5, d6, r0
+;   vmov q8, q10
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vorr q11, q8, q8
+;   vmov.f64 d5, d22
+;   vmov.f64 d6, d23
+;   vcvt.s32.f32 s10, s10
+;   vcvt.f32.s32 s10, s10
+;   vcvt.s32.f32 s11, s11
+;   vcvt.f32.s32 s11, s11
+;   vcvt.s32.f32 s12, s12
+;   vcvt.f32.s32 s12, s12
+;   vcvt.s32.f32 s13, s13
+;   vcvt.f32.s32 s13, s13
+;   vmov.f64 d18, d5
+;   vmov.f64 d19, d6
+;   vmov.i32 q8, #0x80000000
+;   vbit q9, q11, q8
+;   vmov.i32 q8, #0x4b000000
+;   vacge.f32 q8, q11, q8
+;   vbit q9, q11, q8
+;   vceq.f32 q8, q11, q11
+;   vadd.f32 q10, q11, q11
+;   vbit q10, q9, q8
+;   vorr q8, q10, q10
+;   bx lr
+
+
+;; f32x4 `fmin`/`fmax` compare order-preserving integer keys of the lanes.
+function %fmin_f32x4(f32x4, f32x4) -> f32x4 {
+block0(v0: f32x4, v1: f32x4):
+    v2 = fmin v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   vmov q11, q8
+;   vmov q12, q9
+;   vmin.f32x q10, q11, q12 ; tmps q9, q8
+;   vmov q8, q10
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vorr q11, q8, q8
+;   vorr q12, q9, q9
+;   vshr.s32 q9, q11, #0x1f
+;   vshr.u32 q9, q9, #1
+;   veor q9, q9, q11
+;   vshr.s32 q8, q12, #0x1f
+;   vshr.u32 q8, q8, #1
+;   veor q8, q8, q12
+;   vcgt.s32 q10, q8, q9
+;   vbsl q10, q11, q12
+;   vceq.f32 q9, q11, q11
+;   vceq.f32 q8, q12, q12
+;   vand q9, q9, q8
+;   vadd.f32 q8, q11, q12
+;   vbif q10, q8, q9
+;   vorr q8, q10, q10
+;   bx lr
+
+
+;; f32x4 comparisons also compare integer keys (with -0 and +0 equal).
+function %fcmp_lt_f32x4(f32x4, f32x4) -> i32x4 {
+block0(v0: f32x4, v1: f32x4):
+    v2 = fcmp lt v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   vmov q11, q8
+;   vmov q12, q9
+;   vcmp_lt.f32x q10, q11, q12 ; tmps q9, q8
+;   vmov q8, q10
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vorr q11, q8, q8
+;   vorr q12, q9, q9
+;   vshr.s32 q9, q11, #0x1f
+;   vshr.u32 q8, q9, #1
+;   veor q8, q8, q11
+;   vsub.i32 q8, q8, q9
+;   vshr.s32 q10, q12, #0x1f
+;   vshr.u32 q9, q10, #1
+;   veor q9, q9, q12
+;   vsub.i32 q9, q9, q10
+;   vcgt.s32 q10, q9, q8
+;   vceq.f32 q9, q11, q11
+;   vceq.f32 q8, q12, q12
+;   vand q9, q9, q8
+;   vand q10, q10, q9
+;   vorr q8, q10, q10
+;   bx lr
+
+
+;; f64x2 lanes are rounded by adding and subtracting 2^52 with VFP.
+function %floor_f64x2(f64x2) -> f64x2 {
+block0(v0: f64x2):
+    v1 = floor v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vmov q12, q8
+;   vround_floor.f64x q11, q12 ; tmps q10, q9, q8, d6, r0
+;   vmov q8, q11
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vorr q12, q8, q8
+;   vmov.i32 q10, #0x43000000
+;   vorr.i32 q10, #0x300000
+;   vshl.i64 q10, q10, #0x20
+;   vmov.i32 q8, #0x80000000
+;   vshl.i64 q8, q8, #0x20
+;   vorr q9, q10, q10
+;   vbit q9, q12, q8
+;   vmrs r0, fpscr
+;   bic ip, r0, #0xc00000
+;   orr ip, ip, #0x800000
+;   vmsr fpscr, ip
+;   vadd.f64 d22, d24, d18
+;   vsub.f64 d22, d22, d18
+;   vabs.f64 d6, d24
+;   vcmp.f64 d6, d20
+;   vmrs apsr_nzcv, fpscr
+;   vmovge.f64 d22, d24
+;   vadd.f64 d23, d25, d19
+;   vsub.f64 d23, d23, d19
+;   vabs.f64 d6, d25
+;   vcmp.f64 d6, d21
+;   vmrs apsr_nzcv, fpscr
+;   vmovge.f64 d23, d25
+;   vmsr fpscr, r0
+;   vbit q11, q12, q8
+;   vorr q8, q11, q11
+;   bx lr
+

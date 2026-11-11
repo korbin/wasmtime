@@ -196,6 +196,36 @@
         (ushr ty x (iconst_u ty 56))))))
   (bswap ty x))
 
+;; LLVM's wasm backend expands a 32-bit byte swap using rotates:
+;;
+;;   (((x ^ rotr(x, 16)) & 0xff00ff00) >> 8) ^ rotr(x, 8)
+;;
+;; Match all orderings of the two `bxor`s.
+(rule (simplify (bxor ty @ $I32
+    (ushr ty
+      (band ty (bxor ty x (rotr ty x (iconst_u _ 16))) (iconst_u ty 0xff00ff00))
+      (iconst_u _ 8))
+    (rotr ty x (iconst_u _ 8))))
+  (bswap ty x))
+(rule (simplify (bxor ty @ $I32
+    (ushr ty
+      (band ty (bxor ty (rotr ty x (iconst_u _ 16)) x) (iconst_u ty 0xff00ff00))
+      (iconst_u _ 8))
+    (rotr ty x (iconst_u _ 8))))
+  (bswap ty x))
+(rule (simplify (bxor ty @ $I32
+    (rotr ty x (iconst_u _ 8))
+    (ushr ty
+      (band ty (bxor ty x (rotr ty x (iconst_u _ 16))) (iconst_u ty 0xff00ff00))
+      (iconst_u _ 8))))
+  (bswap ty x))
+(rule (simplify (bxor ty @ $I32
+    (rotr ty x (iconst_u _ 8))
+    (ushr ty
+      (band ty (bxor ty (rotr ty x (iconst_u _ 16)) x) (iconst_u ty 0xff00ff00))
+      (iconst_u _ 8))))
+  (bswap ty x))
+
 (rule (simplify (bxor ty (bor ty x y) (band ty x y))) (bxor ty x y))
 
 

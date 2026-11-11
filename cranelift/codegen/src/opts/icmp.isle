@@ -58,6 +58,27 @@
                       (all_zero _)))
       (subsume inner))
 
+;; The complement of a float condition code is its negation, including for
+;; unordered operands.
+;; eq(fcmp(ty, cc, x, y), 0) == fcmp(ty, cc_complement, x, y)
+;; e.g. eq(le(x, y), 0) == ugt(x, y)
+(rule (simplify (eq _
+                      (uextend_maybe _ (fcmp ty cc x y))
+                      (all_zero _)))
+      (subsume (fcmp ty (floatcc_complement cc) x y)))
+
+;; ne(fcmp(ty, cc, x, y), 1) == fcmp(ty, cc_complement, x, y)
+(rule (simplify (ne _
+                      (uextend_maybe _ (fcmp ty cc x y))
+                      (iconst_u _ 1)))
+      (subsume (fcmp ty (floatcc_complement cc) x y)))
+
+;; eq(fcmp(ty, cc, x, y), 1) == fcmp(ty, cc, x, y)
+(rule (simplify (eq _
+                      (uextend_maybe _ inner @ (fcmp _ _ _ _))
+                      (iconst_u _ 1)))
+      (subsume inner))
+
 ;; eq(icmp(ty, cc, x, y), 0) == icmp(ty, cc_complement, x, y)
 ;; e.g. eq(ugt(x, y), 0) == ule(x, y)
 (rule (simplify (eq _

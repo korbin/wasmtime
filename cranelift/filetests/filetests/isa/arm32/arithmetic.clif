@@ -1,0 +1,370 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+function %iadd_i32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = iadd v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   add r0, r0, r1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, r1
+;   bx lr
+
+function %iadd_imm(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 0xff00
+    v2 = iadd v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   add r0, r0, #65280
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, #0xff00
+;   bx lr
+
+function %isub_neg_imm(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 -4
+    v2 = isub v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   add r0, r0, #4
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add r0, r0, #4
+;   bx lr
+
+function %imul_i32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = imul v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mul r0, r0, r1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mul r0, r0, r1
+;   bx lr
+
+function %band_inv_imm(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 0xffffff00
+    v2 = band v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   bic r0, r0, #255
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bic r0, r0, #0xff
+;   bx lr
+
+function %ishl_imm_i8(i8) -> i8 {
+block0(v0: i8):
+    v1 = iconst.i32 3
+    v2 = ishl v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   lsl r0, r0, #3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   lsl r0, r0, #3
+;   bx lr
+
+function %ushr_i16(i16, i16) -> i16 {
+block0(v0: i16, v1: i16):
+    v2 = ushr v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   uxth r3, r0
+;   and r0, r1, #15
+;   lsr r0, r3, r0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   uxth r3, r0
+;   and r0, r1, #0xf
+;   lsr r0, r3, r0
+;   bx lr
+
+function %rotl_i32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = rotl v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   rsb r3, r1, #0
+;   ror r0, r0, r3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   rsb r3, r1, #0
+;   ror r0, r0, r3
+;   bx lr
+
+function %udiv_i32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = udiv v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mov r3, r0
+;   cmp r1, #0
+;   udfeq ; trap=int_divz
+;   udivmod32 r0, r2, r3, r1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mov r3, r0
+;   cmp r1, #0
+;   beq #0x40
+;   clz ip, r3
+;   lsl r0, r3, ip
+;   mov r2, #0
+;   rsbs ip, ip, #0x20
+;   beq #0x3c
+;   adds r0, r0, r0
+;   adcs r2, r2, r2
+;   cmplo r2, r1
+;   subhs r2, r2, r1
+;   orrhs r0, r0, #1
+;   subs ip, ip, #1
+;   bne #0x20
+;   bx lr
+;   udf #0 ; trap: int_divz
+
+function %sdiv_i32_soft(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = sdiv v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r4, fp, lr}
+;   add fp, sp, #4
+; block0:
+;   cmp r1, #0
+;   udfeq ; trap=int_divz
+;   mov r2, #2147483648
+;   cmn r1, #1
+;   cmpeq r0, r2
+;   udfeq ; trap=int_ovf
+;   rsb r3, r0, #0
+;   cmp r0, #0
+;   mov r2, r0
+;   csel r2, r3, r2, lt
+;   mov lr, r0
+;   rsb r0, r1, #0
+;   cmp r1, #0
+;   mov r4, r1
+;   csel r4, r0, r4, lt
+;   udivmod32 r0, r3, r2, r4
+;   mov r2, lr
+;   eor r2, r2, r1
+;   rsb r1, r0, #0
+;   cmp r2, #0
+;   csel r0, r1, r0, lt
+;   pop {r4, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, fp, lr}
+;   add fp, sp, #4
+; block1: ; offset 0x8
+;   cmp r1, #0
+;   beq #0x8c
+;   mov r2, #0x80000000
+;   cmn r1, #1
+;   cmpeq r0, r2
+;   beq #0x90
+;   rsb r3, r0, #0
+;   cmp r0, #0
+;   mov r2, r0
+;   movlt r2, r3
+;   mov lr, r0
+;   rsb r0, r1, #0
+;   cmp r1, #0
+;   mov r4, r1
+;   movlt r4, r0
+;   clz ip, r2
+;   lsl r0, r2, ip
+;   mov r3, #0
+;   rsbs ip, ip, #0x20
+;   beq #0x74
+;   adds r0, r0, r0
+;   adcs r3, r3, r3
+;   cmplo r3, r4
+;   subhs r3, r3, r4
+;   orrhs r0, r0, #1
+;   subs ip, ip, #1
+;   bne #0x58
+;   mov r2, lr
+;   eor r2, r2, r1
+;   rsb r1, r0, #0
+;   cmp r2, #0
+;   movlt r0, r1
+;   pop {r4, fp, pc}
+;   udf #0 ; trap: int_divz
+;   udf #0 ; trap: int_ovf
+
+function %clz_i8(i8) -> i8 {
+block0(v0: i8):
+    v1 = clz v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   uxtb r2, r0
+;   clz r0, r2
+;   sub r0, r0, #24
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   uxtb r2, r0
+;   clz r0, r2
+;   sub r0, r0, #0x18
+;   bx lr
+
+function %popcnt_i32(i32) -> i32 {
+block0(v0: i32):
+    v1 = popcnt v0
+    return v1
+}
+
+; VCode:
+;   push {r4, fp, lr}
+;   add fp, sp, #4
+; block0:
+;   mov r4, r0
+;   movw r3, #21845
+;   movt r3, #21845
+;   movw r2, #13107
+;   movt r2, #13107
+;   movw r0, #3855
+;   movt r0, #3855
+;   movw r1, #257
+;   movt r1, #257
+;   and r3, r3, r4, lsr #1
+;   sub r4, r4, r3
+;   and r3, r4, r2
+;   and r2, r2, r4, lsr #2
+;   add r2, r3, r2
+;   add r2, r2, r2, lsr #4
+;   and r0, r2, r0
+;   mul r0, r0, r1
+;   lsr r0, r0, #24
+;   pop {r4, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, fp, lr}
+;   add fp, sp, #4
+; block1: ; offset 0x8
+;   mov r4, r0
+;   movw r3, #0x5555
+;   movt r3, #0x5555
+;   movw r2, #0x3333
+;   movt r2, #0x3333
+;   movw r0, #0xf0f
+;   movt r0, #0xf0f
+;   movw r1, #0x101
+;   movt r1, #0x101
+;   and r3, r3, r4, lsr #1
+;   sub r4, r4, r3
+;   and r3, r4, r2
+;   and r2, r2, r4, lsr #2
+;   add r2, r3, r2
+;   add r2, r2, r2, lsr #4
+;   and r0, r2, r0
+;   mul r0, r0, r1
+;   lsr r0, r0, #0x18
+;   pop {r4, fp, pc}
+
+function %icmp_slt_i16(i16, i16) -> i8 {
+block0(v0: i16, v1: i16):
+    v2 = icmp slt v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   sxth r3, r0
+;   sxth r0, r1
+;   cmp r3, r0
+;   cset r0, lt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   sxth r3, r0
+;   sxth r0, r1
+;   cmp r3, r0
+;   mov r0, #0
+;   movlt r0, #1
+;   bx lr
+
+function %select_i32(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v5 = iconst.i32 0
+    v3 = icmp eq v0, v5
+    v4 = select v3, v1, v2
+    return v4
+}
+
+; VCode:
+; block0:
+;   cmp r0, #0
+;   mov r0, r2
+;   csel r0, r1, r0, eq
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, #0
+;   mov r0, r2
+;   moveq r0, r1
+;   bx lr
+

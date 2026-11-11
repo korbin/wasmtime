@@ -34,18 +34,16 @@ pub(crate) fn get_flags(file: &File) -> io::Result<DescriptorFlags> {
 
 pub(crate) fn advise(file: &File, offset: u64, len: u64, advice: Advice) -> io::Result<()> {
     cfg_select! {
-        target_vendor = "apple" => {
-            match advice {
-                Advice::WillNeed => {
-                    rustix::fs::fcntl_rdadvise(file, offset, len)?;
-                }
-                Advice::Normal |
-                Advice::Sequential |
-                Advice::Random |
-                Advice::DontNeed |
-                Advice::NoReuse => {}
+        target_vendor = "apple" => match advice {
+            Advice::WillNeed => {
+                rustix::fs::fcntl_rdadvise(file, offset, len)?;
             }
-        }
+            Advice::Normal
+            | Advice::Sequential
+            | Advice::Random
+            | Advice::DontNeed
+            | Advice::NoReuse => {}
+        },
         any(target_os = "linux", target_os = "android") => {
             use std::num::NonZeroU64;
             let advice = match advice {

@@ -2,7 +2,10 @@
 //! provided by the module for the system it runs on.
 
 cfg_select! {
-    all(target_arch = "aarch64", any(target_os = "linux", target_os = "android")) => {
+    all(
+        any(target_arch = "aarch64", target_arch = "arm"),
+        any(target_os = "linux", target_os = "android")
+    ) => {
         mod membarrier;
         pub(crate) use membarrier::pipeline_flush_mt;
     }
@@ -26,6 +29,10 @@ cfg_select! {
     all(target_arch = "riscv64", target_os = "linux") => {
         mod riscv64_linux;
         pub(crate) use riscv64_linux::clear_cache;
+    }
+    all(target_arch = "arm", any(target_os = "linux", target_os = "android")) => {
+        mod arm_linux;
+        pub(crate) use arm_linux::clear_cache;
     }
     _ => {
         /// See docs on [crate::clear_cache] for a description of what this function is trying to do.

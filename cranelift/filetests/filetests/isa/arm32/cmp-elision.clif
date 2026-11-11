@@ -1,0 +1,69 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+;; The second (identical) comparison is not emitted: nothing in between
+;; changes the flags or the compared registers.
+function %repeated_cmp(i32, i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32, v3: i32):
+    v4 = icmp ugt v0, v1
+    v5 = select v4, v2, v3
+    v6 = icmp ugt v0, v1
+    v7 = select v6, v3, v2
+    v8 = iadd v5, v7
+    return v8
+}
+
+; VCode:
+;   push {r8, fp, lr}
+;   add fp, sp, #4
+; block0:
+;   cmp r0, r1
+;   mov r8, r3
+;   csel r8, r2, r8, hi
+;   cmp r0, r1
+;   csel r2, r3, r2, hi
+;   add r0, r8, r2
+;   pop {r8, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r8, fp, lr}
+;   add fp, sp, #4
+; block1: ; offset 0x8
+;   cmp r0, r1
+;   mov r8, r3
+;   movhi r8, r2
+;   movhi r2, r3
+;   add r0, r8, r2
+;   pop {r8, fp, pc}
+
+;; Here the comparison's operand is redefined in between, so the comparison
+;; must be repeated.
+function %cmp_operand_redefined(i32, i32, i32) -> i32 {
+block0(v0: i32, v1: i32, v2: i32):
+    v3 = icmp sgt v0, v1
+    v4 = select v3, v0, v1
+    v5 = icmp sgt v4, v2
+    v6 = select v5, v4, v2
+    return v6
+}
+
+; VCode:
+; block0:
+;   cmp r0, r1
+;   csel r1, r0, r1, gt
+;   cmp r1, r2
+;   mov r0, r2
+;   csel r0, r1, r0, gt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   cmp r0, r1
+;   movgt r1, r0
+;   cmp r1, r2
+;   mov r0, r2
+;   movgt r0, r1
+;   bx lr
+

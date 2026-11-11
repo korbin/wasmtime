@@ -56,6 +56,6 @@ cfg_select! {
     _ => {
         // Otherwise unix platforms use the signals-based implementation of
         // these functions.
-        pub use super::signals::{TrapHandler, SignalHandler, lazy_per_thread_init};
+        pub use super::signals::{SignalHandler, TrapHandler, lazy_per_thread_init};
     }
 }

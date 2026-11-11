@@ -1,0 +1,189 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_neon
+
+;; The top bits of 8-, 16- and 32-bit lanes are gathered with shifts and
+;; `vsra` (shift right and accumulate).
+
+function %bitmask_i8x16(i8x16) -> i16 {
+block0(v0: i8x16):
+    v1 = vhigh_bits.i16 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vshru.8 q8, q8, #7
+;   vsra.u16 q8, q8, #7
+;   vsra.u32 q8, q8, #14
+;   vsra.u64 q8, q8, #28
+;   vmov.u8 r0, q8[0]
+;   vmov.u8 r1, q8[8]
+;   orr r0, r0, r1, lsl #8
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vshr.u8 q8, q8, #7
+;   vsra.u16 q8, q8, #7
+;   vsra.u32 q8, q8, #0xe
+;   vsra.u64 q8, q8, #0x1c
+;   vmov.u8 r0, d16[0]
+;   vmov.u8 r1, d17[0]
+;   orr r0, r0, r1, lsl #8
+;   bx lr
+
+function %bitmask_i16x8(i16x8) -> i8 {
+block0(v0: i16x8):
+    v1 = vhigh_bits.i8 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vshru.16 q8, q8, #15
+;   vsra.u32 q8, q8, #15
+;   vsra.u64 q8, q8, #30
+;   vmov.u8 r0, q8[0]
+;   vmov.u8 r1, q8[8]
+;   orr r0, r0, r1, lsl #4
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vshr.u16 q8, q8, #0xf
+;   vsra.u32 q8, q8, #0xf
+;   vsra.u64 q8, q8, #0x1e
+;   vmov.u8 r0, d16[0]
+;   vmov.u8 r1, d17[0]
+;   orr r0, r0, r1, lsl #4
+;   bx lr
+
+function %bitmask_i32x4(i32x4) -> i8 {
+block0(v0: i32x4):
+    v1 = vhigh_bits.i8 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vshru.32 q8, q8, #31
+;   vsra.u64 q8, q8, #31
+;   vmov.u8 r0, q8[0]
+;   vmov.u8 r1, q8[8]
+;   orr r0, r0, r1, lsl #2
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vshr.u32 q8, q8, #0x1f
+;   vsra.u64 q8, q8, #0x1f
+;   vmov.u8 r0, d16[0]
+;   vmov.u8 r1, d17[0]
+;   orr r0, r0, r1, lsl #2
+;   bx lr
+
+function %bitmask_i64x2(i64x2) -> i8 {
+block0(v0: i64x2):
+    v1 = vhigh_bits.i8 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vmov.u32 r2, q8[1]
+;   lsr r0, r2, #31
+;   vmov.u32 r1, q8[3]
+;   lsr r1, r1, #31
+;   orr r0, r0, r1, lsl #1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.32 r2, d16[1]
+;   lsr r0, r2, #0x1f
+;   vmov.32 r1, d17[1]
+;   lsr r1, r1, #0x1f
+;   orr r0, r0, r1, lsl #1
+;   bx lr
+
+
+;; The halves of the vector are or-ed together before the single transfer to
+;; core registers.
+function %any_true(i8x16) -> i8 {
+block0(v0: i8x16):
+    v1 = vany_true v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vorr d2, q8.d0, q8.d1
+;   vmov r1, r0, d2
+;   orrs r0, r1, r0
+;   cset r0, ne
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vorr d2, d16, d17
+;   vmov r1, r0, d2
+;   orrs r0, r1, r0
+;   mov r0, #0
+;   movne r0, #1
+;   bx lr
+
+function %all_true_i32x4(i32x4) -> i8 {
+block0(v0: i32x4):
+    v1 = vall_true v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vceqz.32 q8, q8
+;   vorr d4, q8.d0, q8.d1
+;   vmov r1, r0, d4
+;   orrs r0, r1, r0
+;   cset r0, eq
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vceq.i32 q8, q8, #0
+;   vorr d4, d16, d17
+;   vmov r1, r0, d4
+;   orrs r0, r1, r0
+;   mov r0, #0
+;   moveq r0, #1
+;   bx lr
+
+
+
+;; The 0/1 result needs no extension.
+function %uextend_vall_true(i8x16) -> i32 {
+block0(v0: i8x16):
+    v1 = vall_true v0
+    v2 = uextend.i32 v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   vceqz.8 q8, q8
+;   vorr d4, q8.d0, q8.d1
+;   vmov r1, r0, d4
+;   orrs r0, r1, r0
+;   cset r0, eq
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vceq.i8 q8, q8, #0
+;   vorr d4, d16, d17
+;   vmov r1, r0, d4
+;   orrs r0, r1, r0
+;   mov r0, #0
+;   moveq r0, #1
+;   bx lr
+

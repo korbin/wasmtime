@@ -1,0 +1,145 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_neon
+
+;; Shuffles with special forms avoid the table lookup.
+
+function %ext(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, 0x14131211100f0e0d0c0b0a0908070605
+    return v2
+}
+
+; VCode:
+; block0:
+;   vext.8 q8, q8, q9, #5
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vext.8 q8, q8, q9, #5
+;   bx lr
+
+function %rotate(i8x16) -> i8x16 {
+block0(v0: i8x16):
+    v2 = shuffle v0, v0, 0x0201000f0e0d0c0b0a09080706050403
+    return v2
+}
+
+; VCode:
+; block0:
+;   vext.8 q8, q8, q8, #3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vext.8 q8, q8, q8, #3
+;   bx lr
+
+function %rev64_8(i8x16) -> i8x16 {
+block0(v0: i8x16):
+    v2 = shuffle v0, v0, 0x08090a0b0c0d0e0f0001020304050607
+    return v2
+}
+
+; VCode:
+; block0:
+;   vrev64.8 q8, q8
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vrev64.8 q8, q8
+;   bx lr
+
+function %rev32_16_second(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, 0x1d1c1f1e19181b1a1514171611101312
+    return v2
+}
+
+; VCode:
+; block0:
+;   vrev32.16 q8, q9
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vrev32.16 q8, q9
+;   bx lr
+
+function %dup32_lane2(i8x16) -> i8x16 {
+block0(v0: i8x16):
+    v2 = shuffle v0, v0, 0x0b0a09080b0a09080b0a09080b0a0908
+    return v2
+}
+
+; VCode:
+; block0:
+;   vdup.32 q8, q8[2]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vdup.32 q8, d17[0]
+;   bx lr
+
+function %dup8_lane13(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, 0x0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d
+    return v2
+}
+
+; VCode:
+; block0:
+;   vdup.8 q8, q8[13]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vdup.8 q8, d17[5]
+;   bx lr
+
+function %identity_first(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, 0x0f0e0d0c0b0a09080706050403020100
+    return v2
+}
+
+; VCode:
+; block0:
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   bx lr
+
+function %generic(i8x16, i8x16) -> i8x16 {
+block0(v0: i8x16, v1: i8x16):
+    v2 = shuffle v0, v1, 0x09021b140d061f18110a031c150e0700
+    return v2
+}
+
+; VCode:
+; block0:
+;   vldr q10, [pc, VCodeConstant(0):VCodeConstant(1)]
+;   vmov q14, q8
+;   vmov q15, q9
+;   vtbl.8 q8, {q14, q15}, q10
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d20, [pc, #0x18]
+;   vldr d21, [pc, #0x1c]
+;   vorr q14, q8, q8
+;   vorr q15, q9, q9
+;   vtbl.8 d16, {d28, d29, d30, d31}, d20
+;   vtbl.8 d17, {d28, d29, d30, d31}, d21
+;   bx lr
+;   andeq r0, r0, r0
+;   strne r0, [lr, #-0x700]
+;   .byte 0x1c, 0x03, 0x0a, 0x11
+;   stceq p15, c1, [r6, #-0x60]
+;   stmdbeq r2, {r2, r4, r8, sb, fp, ip}
+

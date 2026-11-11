@@ -1,0 +1,157 @@
+test compile precise-output
+set unwind_info=false
+target armv7
+
+;; Uses enough values across a call to need callee-saved core and float
+;; registers.
+function %clobbers(i32, f64) -> f64 {
+    fn0 = colocated %g()
+block0(v0: i32, v1: f64):
+    v10 = iconst.i32 1
+    v11 = iconst.i32 2
+    v12 = iconst.i32 3
+    v2 = iadd v0, v10
+    v3 = iadd v0, v11
+    v4 = iadd v0, v12
+    v5 = fadd v1, v1
+    call fn0()
+    v6 = iadd v2, v3
+    v7 = iadd v6, v4
+    v8 = fcvt_from_sint.f64 v7
+    v9 = fadd v8, v5
+    return v9
+}
+
+; VCode:
+;   push {r4, r5, r6, r7, fp, lr}
+;   add fp, sp, #16
+;   vpush {d11-d11}
+; block0:
+;   add r4, r0, #1
+;   add r5, r0, #2
+;   add r6, r0, #3
+;   vadd.f64 d11, d0, d0
+;   bl %g
+;   add r0, r4, r5
+;   add r0, r0, r6
+;   vmov s0, r0
+;   vcvt.f64.s32 d0, s0
+;   vadd.f64 d0, d0, d11
+;   vpop {d11-d11}
+;   pop {r4, r5, r6, r7, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, r5, r6, r7, fp, lr}
+;   add fp, sp, #0x10
+;   vpush {d11}
+; block1: ; offset 0xc
+;   add r4, r0, #1
+;   add r5, r0, #2
+;   add r6, r0, #3
+;   vadd.f64 d11, d0, d0
+;   bl #0x24 ; reloc_external Call %g 0
+;   add r0, r4, r5
+;   add r0, r0, r6
+;   vmov s0, r0
+;   vcvt.f64.s32 d0, s0
+;   vadd.f64 d0, d0, d11
+;   vpop {d11}
+;   pop {r4, r5, r6, r7, fp, pc}
+
+function %large_frame() -> i32 {
+    ss0 = explicit_slot 0x20000
+block0:
+    v0 = stack_addr.i32 ss0
+    v1 = load.i32 v0
+    return v1
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   sub sp, sp, #131072
+; block0:
+;   load_addr r1, [sp]
+;   ldr r0, [r1]
+;   mov sp, fp
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   sub sp, sp, #0x20000
+; block1: ; offset 0xc
+;   mov r1, sp
+;   ldr r0, [r1] ; trap: heap_oob
+;   mov sp, fp
+;   pop {fp, pc}
+
+;; Seven values live across a call use all of r4-r10; LR pads the push to an
+;; even number of registers.
+function %all_int_clobbers(i32) -> i32 {
+    fn0 = colocated %g()
+block0(v0: i32):
+    v1 = load.i32 v0
+    v2 = load.i32 v0+4
+    v3 = load.i32 v0+8
+    v4 = load.i32 v0+12
+    v5 = load.i32 v0+16
+    v6 = load.i32 v0+20
+    v7 = load.i32 v0+24
+    call fn0()
+    v8 = iadd v1, v2
+    v9 = iadd v8, v3
+    v10 = iadd v9, v4
+    v11 = iadd v10, v5
+    v12 = iadd v11, v6
+    v13 = iadd v12, v7
+    return v13
+}
+
+; VCode:
+;   push {r4, r5, r6, r7, r8, r9, r10, fp, lr}
+;   add fp, sp, #28
+;   sub sp, sp, #4
+; block0:
+;   ldr r4, [r0]
+;   ldr r5, [r0, #4]
+;   ldr r6, [r0, #8]
+;   ldr r7, [r0, #12]
+;   ldr r8, [r0, #16]
+;   ldr r9, [r0, #20]
+;   ldr r10, [r0, #24]
+;   bl %g
+;   add r0, r4, r5
+;   add r0, r0, r6
+;   add r0, r0, r7
+;   add r0, r0, r8
+;   add r0, r0, r9
+;   add r0, r0, r10
+;   add sp, sp, #4
+;   pop {r4, r5, r6, r7, r8, r9, r10, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, r5, r6, r7, r8, sb, sl, fp, lr}
+;   add fp, sp, #0x1c
+;   sub sp, sp, #4
+; block1: ; offset 0xc
+;   ldr r4, [r0] ; trap: heap_oob
+;   ldr r5, [r0, #4] ; trap: heap_oob
+;   ldr r6, [r0, #8] ; trap: heap_oob
+;   ldr r7, [r0, #0xc] ; trap: heap_oob
+;   ldr r8, [r0, #0x10] ; trap: heap_oob
+;   ldr sb, [r0, #0x14] ; trap: heap_oob
+;   ldr sl, [r0, #0x18] ; trap: heap_oob
+;   bl #0x30 ; reloc_external Call %g 0
+;   add r0, r4, r5
+;   add r0, r0, r6
+;   add r0, r0, r7
+;   add r0, r0, r8
+;   add r0, r0, sb
+;   add r0, r0, sl
+;   add sp, sp, #4
+;   pop {r4, r5, r6, r7, r8, sb, sl, fp, pc}
+

@@ -239,7 +239,10 @@ pub fn abort_stack_overflow() -> ! {
 )]
 unsafe fn get_trap_registers(cx: *mut libc::c_void, _signum: libc::c_int) -> TrapRegisters {
     cfg_select! {
-        all(any(target_os = "linux", target_os = "android", target_os = "illumos"), target_arch = "x86_64") => {
+        all(
+            any(target_os = "linux", target_os = "android", target_os = "illumos"),
+            target_arch = "x86_64"
+        ) => {
             let cx = unsafe { &*(cx as *const libc::ucontext_t) };
             TrapRegisters {
                 pc: cx.uc_mcontext.gregs[libc::REG_RIP as usize] as usize,
@@ -255,7 +258,10 @@ unsafe fn get_trap_registers(cx: *mut libc::c_void, _signum: libc::c_int) -> Tra
                 lr: None,
             }
         }
-        all(any(target_os = "linux", target_os = "android"), target_arch = "aarch64") => {
+        all(
+            any(target_os = "linux", target_os = "android"),
+            target_arch = "aarch64"
+        ) => {
             let cx = unsafe { &*(cx as *const libc::ucontext_t) };
             TrapRegisters {
                 pc: cx.uc_mcontext.pc as usize,
@@ -289,26 +295,22 @@ unsafe fn get_trap_registers(cx: *mut libc::c_void, _signum: libc::c_int) -> Tra
                 }
             }
         }
-        all(target_vendor = "apple", target_arch = "x86_64") => {
-            unsafe {
-                let cx = &*(cx as *const libc::ucontext_t);
-                TrapRegisters {
-                    pc: (*cx.uc_mcontext).__ss.__rip as usize,
-                    fp: (*cx.uc_mcontext).__ss.__rbp as usize,
-                    lr: None,
-                }
+        all(target_vendor = "apple", target_arch = "x86_64") => {unsafe {
+            let cx = &*(cx as *const libc::ucontext_t);
+            TrapRegisters {
+                pc: (*cx.uc_mcontext).__ss.__rip as usize,
+                fp: (*cx.uc_mcontext).__ss.__rbp as usize,
+                lr: None,
             }
-        }
-        all(target_vendor = "apple", target_arch = "aarch64") => {
-            unsafe {
-                let cx = &*(cx as *const libc::ucontext_t);
-                TrapRegisters {
-                    pc: (*cx.uc_mcontext).__ss.__pc as usize,
-                    fp: (*cx.uc_mcontext).__ss.__fp as usize,
-                    lr: None,
-                }
+        }}
+        all(target_vendor = "apple", target_arch = "aarch64") => {unsafe {
+            let cx = &*(cx as *const libc::ucontext_t);
+            TrapRegisters {
+                pc: (*cx.uc_mcontext).__ss.__pc as usize,
+                fp: (*cx.uc_mcontext).__ss.__fp as usize,
+                lr: None,
             }
-        }
+        }}
         all(target_os = "freebsd", target_arch = "x86_64") => {
             let cx = unsafe { &*(cx as *const libc::ucontext_t) };
             TrapRegisters {
@@ -368,7 +370,10 @@ unsafe fn get_trap_registers(cx: *mut libc::c_void, _signum: libc::c_int) -> Tra
 /// resumption while returning from the signal handler.
 unsafe fn store_handler_in_ucontext(cx: *mut libc::c_void, handler: &Handler) {
     cfg_select! {
-        all(any(target_os = "linux", target_os = "android", target_os = "illumos"), target_arch = "x86_64") => {
+        all(
+            any(target_os = "linux", target_os = "android", target_os = "illumos"),
+            target_arch = "x86_64"
+        ) => {
             let cx = unsafe { cx.cast::<libc::ucontext_t>().as_mut().unwrap() };
             cx.uc_mcontext.gregs[libc::REG_RIP as usize] = handler.pc as _;
             cx.uc_mcontext.gregs[libc::REG_RSP as usize] = handler.sp as _;
@@ -376,7 +381,10 @@ unsafe fn store_handler_in_ucontext(cx: *mut libc::c_void, handler: &Handler) {
             cx.uc_mcontext.gregs[libc::REG_RAX as usize] = 0;
             cx.uc_mcontext.gregs[libc::REG_RDX as usize] = 0;
         }
-        all(any(target_os = "linux", target_os = "android"), target_arch = "aarch64") => {
+        all(
+            any(target_os = "linux", target_os = "android"),
+            target_arch = "aarch64"
+        ) => {
             let cx = unsafe { cx.cast::<libc::ucontext_t>().as_mut().unwrap() };
             cx.uc_mcontext.pc = handler.pc as _;
             cx.uc_mcontext.sp = handler.sp as _;
@@ -391,28 +399,24 @@ unsafe fn store_handler_in_ucontext(cx: *mut libc::c_void, handler: &Handler) {
             cx.uc_mcontext.gregs[6] = 0;
             cx.uc_mcontext.gregs[7] = 0;
         }
-        all(target_vendor = "apple", target_arch = "x86_64") => {
-            unsafe {
-                let cx = cx.cast::<libc::ucontext_t>().as_mut().unwrap();
-                let cx = cx.uc_mcontext.as_mut().unwrap();
-                cx.__ss.__rip = handler.pc as _;
-                cx.__ss.__rsp = handler.sp as _;
-                cx.__ss.__rbp = handler.fp as _;
-                cx.__ss.__rax = 0;
-                cx.__ss.__rdx = 0;
-            }
-        }
-        all(target_vendor = "apple", target_arch = "aarch64") => {
-            unsafe {
-                let cx = cx.cast::<libc::ucontext_t>().as_mut().unwrap();
-                let cx = cx.uc_mcontext.as_mut().unwrap();
-                cx.__ss.__pc = handler.pc as _;
-                cx.__ss.__sp = handler.sp as _;
-                cx.__ss.__fp = handler.fp as _;
-                cx.__ss.__x[0] = 0;
-                cx.__ss.__x[1] = 0;
-            }
-        }
+        all(target_vendor = "apple", target_arch = "x86_64") => {unsafe {
+            let cx = cx.cast::<libc::ucontext_t>().as_mut().unwrap();
+            let cx = cx.uc_mcontext.as_mut().unwrap();
+            cx.__ss.__rip = handler.pc as _;
+            cx.__ss.__rsp = handler.sp as _;
+            cx.__ss.__rbp = handler.fp as _;
+            cx.__ss.__rax = 0;
+            cx.__ss.__rdx = 0;
+        }}
+        all(target_vendor = "apple", target_arch = "aarch64") => {unsafe {
+            let cx = cx.cast::<libc::ucontext_t>().as_mut().unwrap();
+            let cx = cx.uc_mcontext.as_mut().unwrap();
+            cx.__ss.__pc = handler.pc as _;
+            cx.__ss.__sp = handler.sp as _;
+            cx.__ss.__fp = handler.fp as _;
+            cx.__ss.__x[0] = 0;
+            cx.__ss.__x[1] = 0;
+        }}
         all(target_os = "freebsd", target_arch = "x86_64") => {
             let cx = unsafe { cx.cast::<libc::ucontext_t>().as_mut().unwrap() };
             cx.uc_mcontext.mc_rip = handler.pc as _;
@@ -436,6 +440,16 @@ unsafe fn store_handler_in_ucontext(cx: *mut libc::c_void, handler: &Handler) {
             cx.sc_rsp = handler.sp as _;
             cx.sc_rax = 0;
             cx.sc_rdx = 0;
+        }
+        all(target_os = "linux", target_arch = "arm") => {
+            let cx = unsafe { cx.cast::<libc::ucontext_t>().as_mut().unwrap() };
+            cx.uc_mcontext.arm_pc = handler.pc as _;
+            cx.uc_mcontext.arm_fp = handler.fp as _;
+            cx.uc_mcontext.arm_sp = handler.sp as _;
+            cx.uc_mcontext.arm_r0 = 0;
+            cx.uc_mcontext.arm_r1 = 0;
+            // Resume in ARM (not Thumb) state.
+            cx.uc_mcontext.arm_cpsr &= !(1 << 5);
         }
         all(target_os = "linux", target_arch = "riscv64") => {
             let cx = unsafe { cx.cast::<libc::ucontext_t>().as_mut().unwrap() };

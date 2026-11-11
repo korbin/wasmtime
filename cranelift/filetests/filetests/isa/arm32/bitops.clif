@@ -1,0 +1,91 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_neon
+
+;; With NEON, population counts use `vcnt.8`.
+function %popcnt_i32(i32) -> i32 {
+block0(v0: i32):
+    v1 = popcnt v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   popcnt_neon r0, r0 ; tmp d3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.32 d3[0], r0
+;   vcnt.8 d3, d3
+;   vpaddl.u8 d3, d3
+;   vpaddl.u16 d3, d3
+;   vmov.32 r0, d3[0]
+;   bx lr
+
+function %popcnt_i64(i64) -> i64 {
+block0(v0: i64):
+    v1 = popcnt v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   popcnt_neon r0, r0, r1 ; tmp d4
+;   mov r1, #0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov d4, r0, r1
+;   vcnt.8 d4, d4
+;   vpaddl.u8 d4, d4
+;   vpaddl.u16 d4, d4
+;   vpaddl.u32 d4, d4
+;   vmov.32 r0, d4[0]
+;   mov r1, #0
+;   bx lr
+
+;; 64-bit rotates by a variable amount exchange the halves conditionally.
+function %rotl_i64(i64, i64) -> i64 {
+block0(v0: i64, v1: i64):
+    v2 = rotl v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r4, r5, fp, lr}
+;   add fp, sp, #8
+; block0:
+;   mov r4, r1
+;   mov r5, r2
+;   mov lr, r0
+;   rotl64 r3:r2, lr:r4, r5, tmps=r1, r0
+;   mov r0, r3
+;   mov r1, r2
+;   pop {r4, r5, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, r5, fp, lr}
+;   add fp, sp, #8
+; block1: ; offset 0x8
+;   mov r4, r1
+;   mov r5, r2
+;   mov lr, r0
+;   and r1, r5, #0x3f
+;   tst r1, #0x20
+;   and r1, r1, #0x1f
+;   rsb r0, r1, #0x20
+;   lsleq r3, lr, r1
+;   orreq r3, r3, r4, lsr r0
+;   lsleq r2, r4, r1
+;   orreq r2, r2, lr, lsr r0
+;   lslne r3, r4, r1
+;   orrne r3, r3, lr, lsr r0
+;   lslne r2, lr, r1
+;   orrne r2, r2, r4, lsr r0
+;   mov r0, r3
+;   mov r1, r2
+;   pop {r4, r5, fp, pc}
+

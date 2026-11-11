@@ -5029,6 +5029,42 @@ fn detect_host_feature(feature: &str) -> Option<bool> {
         };
     }
 
+    // `is_arm_feature_detected` is nightly only for now, so read the
+    // auxiliary vector directly.
+    #[cfg(all(target_arch = "arm", any(target_os = "linux", target_os = "android")))]
+    {
+        // From the Linux kernel's `arch/arm/include/uapi/asm/hwcap.h`.
+        const HWCAP_NEON: libc::c_ulong = 1 << 12;
+        const HWCAP_VFPV4: libc::c_ulong = 1 << 16;
+        const HWCAP_IDIVA: libc::c_ulong = 1 << 17;
+        let hwcap = unsafe { libc::getauxval(libc::AT_HWCAP) };
+        return match feature {
+            "idiv" => Some(hwcap & HWCAP_IDIVA != 0),
+            "vfp4" => Some(hwcap & HWCAP_VFPV4 != 0),
+            "neon" => Some(hwcap & HWCAP_NEON != 0),
+            // The platform string is e.g. "v7l" or "v8l"; a 32-bit process
+            // on an ARMv8 core sees "v8l" whether the kernel is 32-bit or
+            // 64-bit.
+            "armv8" => {
+                let platform = unsafe { libc::getauxval(libc::AT_PLATFORM) } as *const libc::c_char;
+                if platform.is_null() {
+                    return Some(false);
+                }
+                let platform = unsafe { core::ffi::CStr::from_ptr(platform) }.to_bytes();
+                let version = platform
+                    .strip_prefix(b"v")
+                    .map(|rest| {
+                        rest.iter()
+                            .take_while(|b| b.is_ascii_digit())
+                            .fold(0u32, |acc, b| acc * 10 + u32::from(b - b'0'))
+                    })
+                    .unwrap_or(0);
+                Some(version >= 8)
+            }
+            _ => None,
+        };
+    }
+
     #[cfg(target_arch = "riscv64")]
     {
         return match feature {

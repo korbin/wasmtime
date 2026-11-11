@@ -717,6 +717,51 @@ fn valid_for_target(triple: &Triple, op: Opcode, args: &[Type], rets: &[Type]) -
             )
         }
 
+        Architecture::Arm(_) => {
+            // 128-bit integers don't fit in the two registers a value may
+            // occupy on 32-bit ARM.
+            if args.iter().chain(rets).any(|ty| *ty == I128) {
+                return false;
+            }
+            exceptions!(
+                op,
+                args,
+                rets,
+                // Not implemented.
+                (Opcode::UaddOverflowCin | Opcode::SaddOverflowCin),
+                (Opcode::UsubOverflowBin | Opcode::SsubOverflowBin),
+                (
+                    Opcode::FcvtToUintSat | Opcode::FcvtToSintSat,
+                    &[F64X2],
+                    &[I64X2]
+                ),
+                (Opcode::IaddPairwise, &[I64X2, I64X2]),
+                (Opcode::AvgRound, &[I64X2, I64X2]),
+                (
+                    Opcode::Rotr | Opcode::Rotl,
+                    &[I8X16 | I16X8 | I32X4 | I64X2, _]
+                ),
+                (
+                    Opcode::Popcnt | Opcode::Clz | Opcode::Ctz | Opcode::Cls,
+                    &[I16X8 | I32X4 | I64X2]
+                ),
+                (Opcode::Clz | Opcode::Ctz | Opcode::Cls, &[I8X16]),
+                (
+                    Opcode::Bitrev | Opcode::Bswap | Opcode::Bmask,
+                    &[I8X16 | I16X8 | I32X4 | I64X2]
+                ),
+                (
+                    Opcode::Umulhi | Opcode::Smulhi,
+                    &[I8X16 | I16X8 | I32X4 | I64X2, _]
+                ),
+                (
+                    Opcode::Udiv | Opcode::Sdiv | Opcode::Urem | Opcode::Srem,
+                    &[I8X16 | I16X8 | I32X4 | I64X2, _]
+                ),
+                (Opcode::SqmulRoundSat, &[I8X16 | I64X2, _]),
+            )
+        }
+
         _ => true,
     }
 }
@@ -1238,7 +1283,15 @@ where
         // TODO: Currently our only source of addresses is stack_addr, but we
         // should add global_value, symbol_value eventually
         let (addr, available_size, category) = {
-            let (ss, slot_size, _align, category) = self.stack_slot_with_size(min_size)?;
+            let (ss, slot_size, align, category) = self.stack_slot_with_size(min_size)?;
+
+            // An aligned access needs the slot itself to be sufficiently
+            // aligned. Stack slots are always at least pointer-aligned, which
+            // only covers all access sizes on 64-bit targets.
+            let effective_align = u32::from(align).max(self.isa.pointer_bytes().into());
+            if aligned && effective_align < min_size {
+                return Err(arbitrary::Error::IncorrectFormat.into());
+            }
 
             // stack_slot_with_size guarantees that slot_size >= min_size
             let max_offset = slot_size - min_size;
@@ -1248,7 +1301,9 @@ where
                 self.u.int_in_range(0..=max_offset)?
             };
 
-            let base_addr = builder.ins().stack_addr(I64, ss, offset as i32);
+            let base_addr = builder
+                .ins()
+                .stack_addr(self.isa.pointer_type(), ss, offset as i32);
             let available_size = slot_size.saturating_sub(offset);
             (base_addr, available_size, category)
         };
@@ -1274,7 +1329,7 @@ where
         // RISCV: https://github.com/bytecodealliance/wasmtime/issues/5882
         let requires_aligned_atomics = matches!(
             self.isa.triple().architecture,
-            Architecture::Aarch64(_) | Architecture::Riscv64(_)
+            Architecture::Aarch64(_) | Architecture::Riscv64(_) | Architecture::Arm(_)
         );
         let aligned = if is_atomic && requires_aligned_atomics {
             true
@@ -1578,7 +1633,12 @@ where
         let i16_zero = builder.ins().iconst(I16, 0);
         let i32_zero = builder.ins().iconst(I32, 0);
         let i64_zero = builder.ins().iconst(I64, 0);
-        let i128_zero = builder.ins().uextend(I128, i64_zero);
+        // 32-bit ARM can't hold 128-bit integers.
+        let i128_zero = if matches!(self.isa.triple().architecture, Architecture::Arm(_)) {
+            None
+        } else {
+            Some(builder.ins().uextend(I128, i64_zero))
+        };
 
         for &(slot, init_size, _align, category) in self.resources.stack_slots.iter() {
             let mut size = init_size;
@@ -1587,13 +1647,15 @@ where
             while size != 0 {
                 let offset = (init_size - size) as i32;
                 let (val, filled) = match size {
-                    sz if sz / 16 > 0 => (i128_zero, 16),
+                    sz if sz / 16 > 0 && i128_zero.is_some() => (i128_zero.unwrap(), 16),
                     sz if sz / 8 > 0 => (i64_zero, 8),
                     sz if sz / 4 > 0 => (i32_zero, 4),
                     sz if sz / 2 > 0 => (i16_zero, 2),
                     _ => (i8_zero, 1),
                 };
-                let addr = builder.ins().stack_addr(I64, slot, offset);
+                let addr = builder
+                    .ins()
+                    .stack_addr(self.isa.pointer_type(), slot, offset);
 
                 // Each stack slot has an associated category, that means we have to set the
                 // correct memflags for it. So we can't use `stack_store` directly.
@@ -1709,7 +1771,9 @@ where
                 let is_tail_caller = self.signature.call_conv == CallConv::Tail;
 
                 let supports_tail_calls = match self.isa.triple().architecture {
-                    Architecture::Aarch64(_) | Architecture::Riscv64(_) => true,
+                    Architecture::Aarch64(_) | Architecture::Riscv64(_) | Architecture::Arm(_) => {
+                        true
+                    }
                     // TODO: x64 currently requires frame pointers for tail calls.
                     Architecture::X86_64 => self.isa.flags().preserve_frame_pointers(),
                     // TODO: Other platforms do not support tail calls yet.
@@ -1804,12 +1868,22 @@ where
         Ok(())
     }
 
+    /// Replace types that the target doesn't support with ones it does.
+    fn supported_type(&self, ty: Type) -> Type {
+        match (self.isa.triple().architecture, ty) {
+            // 32-bit ARM can't hold 128-bit integers.
+            (Architecture::Arm(_), I128) => I64,
+            _ => ty,
+        }
+    }
+
     fn generate_block_signature(&mut self) -> Result<BlockSignature> {
         let param_count = self.param(&self.config.block_signature_params)?;
 
         let mut params = Vec::with_capacity(param_count);
         for _ in 0..param_count {
-            params.push(self.u._type((&*self.isa).supports_simd())?);
+            let ty = self.u._type((&*self.isa).supports_simd())?;
+            params.push(self.supported_type(ty));
         }
         Ok(params)
     }
@@ -1830,6 +1904,7 @@ where
         // Create a pool of vars that are going to be used in this function
         for _ in 0..self.param(&self.config.vars_per_function)? {
             let ty = self.u._type((&*self.isa).supports_simd())?;
+            let ty = self.supported_type(ty);
             let value = self.generate_const(builder, ty)?;
             vars.push((ty, value));
         }
@@ -1840,7 +1915,13 @@ where
             // Randomly declare variables as needing a stack map.
             // We limit these to only types that have fewer than 16 bytes
             // since the stack map mechanism does not support larger types.
-            if ty.bytes() <= 16 && self.u.arbitrary()? {
+            // Their spill slots are naturally aligned, so on 32-bit ARM, whose
+            // stack is only 8-byte aligned, also exclude 16-byte types.
+            let max_bytes = match self.isa.triple().architecture {
+                Architecture::Arm(_) => 8,
+                _ => 16,
+            };
+            if ty.bytes() <= max_bytes && self.u.arbitrary()? {
                 builder.declare_var_needs_stack_map(var);
             }
 

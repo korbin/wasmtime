@@ -29,7 +29,17 @@ pub struct Inst {
 pub fn disas(elf: &ElfFile64<'_, Endianness>, func: &[u8], addr: u64) -> Result<Vec<Inst>> {
     let cranelift_target = match elf.architecture() {
         Architecture::X86_64 => "x86_64",
-        Architecture::Aarch64 => "aarch64",
+        Architecture::Aarch64 => {
+            let e_flags = match elf.flags() {
+                FileFlags::Elf { e_flags, .. } => e_flags,
+                _ => bail!("not an ELF file"),
+            };
+            if e_flags.intersects(obj::EF_WASMTIME_ARM32) {
+                "armv7"
+            } else {
+                "aarch64"
+            }
+        }
         Architecture::S390x => "s390x",
         Architecture::Riscv64 => {
             let e_flags = match elf.flags() {
@@ -56,6 +66,22 @@ pub fn disas(elf: &ElfFile64<'_, Endianness>, func: &[u8], addr: u64) -> Result<
     disas_with_capstone(&capstone, func, addr)
 }
 
+/// Whether a 32-bit ARM instruction writes PC through an explicit operand,
+/// like `pop {.., pc}`, `ldr pc, [..]` or `add pc, ..`, which capstone doesn't
+/// put in the jump or return groups.
+fn arm_writes_pc(detail: &capstone::InsnDetail) -> bool {
+    use capstone::arch::DetailsArchInsn;
+    use capstone::arch::arm::{ArmOperandType, ArmReg};
+    let arch = detail.arch_detail();
+    let Some(arm) = arch.arm() else {
+        return false;
+    };
+    arm.operands().any(|op| {
+        matches!(op.op_type, ArmOperandType::Reg(r) if u32::from(r.0) == ArmReg::ARM_REG_PC)
+            && op.access.is_some_and(|a| a.is_writable())
+    })
+}
+
 /// Disassemble `func` bytes at the given `addr` using an already-configured
 /// capstone instance.
 pub fn disas_with_capstone(
@@ -71,7 +97,7 @@ pub fn disas_with_capstone(
             let detail = capstone.insn_detail(&inst).ok();
             let detail = detail.as_ref();
             let is_jump = detail
-                .map(|d| d.groups().iter().any(|g| g.0 as u32 == CS_GRP_JUMP))
+                .map(|d| d.groups().iter().any(|g| g.0 as u32 == CS_GRP_JUMP) || arm_writes_pc(d))
                 .unwrap_or(false);
 
             let is_return = detail

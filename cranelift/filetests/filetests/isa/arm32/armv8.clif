@@ -1,0 +1,194 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_neon has_armv8
+
+;; ARMv8 rounding instructions.
+function %ceil_f32(f32) -> f32 {
+block0(v0: f32):
+    v1 = ceil v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vrintp.f32 s0, s0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vrintp.f32 s0, s0
+;   bx lr
+
+function %nearest_f64(f64) -> f64 {
+block0(v0: f64):
+    v1 = nearest v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vrintn.f64 d0, d0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vrintn.f64 d0, d0
+;   bx lr
+
+;; f32x4 lanes are rounded with VFP `vrint` (NEON's flushes denormals).
+function %floor_f32x4(f32x4) -> f32x4 {
+block0(v0: f32x4):
+    v1 = floor v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vrintm.f32 q8, q8, tmp=d3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.f64 d3, d16
+;   vrintm.f32 s6, s6
+;   vrintm.f32 s7, s7
+;   vmov.f64 d16, d3
+;   vmov.f64 d3, d17
+;   vrintm.f32 s6, s6
+;   vrintm.f32 s7, s7
+;   vmov.f64 d17, d3
+;   bx lr
+
+function %trunc_f64x2(f64x2) -> f64x2 {
+block0(v0: f64x2):
+    v1 = trunc v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vrintz.f64 q8, q8, tmp=d3
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vrintz.f64 d16, d16
+;   vrintz.f64 d17, d17
+;   bx lr
+
+
+;; Sequentially consistent atomics with load-acquire/store-release and their
+;; exclusive forms, without barriers.
+function %atomic_load_i32(i32) -> i32 {
+block0(v0: i32):
+    v1 = atomic_load.i32 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   lda r0, [r0]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   lda r0, [r0] ; trap: heap_oob
+;   bx lr
+
+function %atomic_store_i8(i8, i32) {
+block0(v0: i8, v1: i32):
+    atomic_store.i8 v0, v1
+    return
+}
+
+; VCode:
+; block0:
+;   stlb r0, [r1]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   stlb r0, [r1] ; trap: heap_oob
+;   bx lr
+
+function %atomic_rmw_add_i32(i32, i32) -> i32 {
+block0(v0: i32, v1: i32):
+    v2 = atomic_rmw.i32 add v0, v1
+    return v2
+}
+
+; VCode:
+;   push {r7, fp, lr}
+;   add fp, sp, #4
+; block0:
+;   mov r2, r0
+;   mov r7, r1
+;   atomic_rmw_loop_Add_4 r3, [r2], r7, tmps=r1, r0
+;   mov r0, r3
+;   pop {r7, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r7, fp, lr}
+;   add fp, sp, #4
+; block1: ; offset 0x8
+;   mov r2, r0
+;   mov r7, r1
+;   ldaex r3, [r2] ; trap: heap_oob
+;   add r1, r3, r7
+;   stlex r0, r1, [r2] ; trap: heap_oob
+;   cmp r0, #0
+;   bne #0x10
+;   mov r0, r3
+;   pop {r7, fp, pc}
+
+function %atomic_cas_i64(i32, i64, i64) -> i64 {
+block0(v0: i32, v1: i64, v2: i64):
+    v3 = atomic_cas.i64 v0, v1, v2
+    return v3
+}
+
+; VCode:
+;   push {r4, r5, r6, r7, fp, lr}
+;   add fp, sp, #16
+; block0:
+;   ldr r4, [sp, #24]
+;   ldr r5, [sp, #28]
+;   mov r7, r0
+;   atomic_cas_loop64 r0:r1, [r7], r2:r3, r4:r5
+;   pop {r4, r5, r6, r7, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r4, r5, r6, r7, fp, lr}
+;   add fp, sp, #0x10
+; block1: ; offset 0x8
+;   ldr r4, [sp, #0x18]
+;   ldr r5, [sp, #0x1c]
+;   mov r7, r0
+;   ldaexd r0, r1, [r7] ; trap: heap_oob
+;   cmp r1, r3
+;   cmpeq r0, r2
+;   bne #0x30
+;   stlexd r6, r4, r5, [r7] ; trap: heap_oob
+;   cmp r6, #0
+;   bne #0x14
+;   pop {r4, r5, r6, r7, fp, pc}
+
+function %atomic_load_i64(i32) -> i64 {
+block0(v0: i32):
+    v1 = atomic_load.i64 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   ldrexd r0, r1, [r0] ; clrex ; dmb ish
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   ldaexd r0, r1, [r0] ; trap: heap_oob
+;   clrex
+;   bx lr
+

@@ -1,0 +1,104 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_neon
+
+;; Floating-point and vector constants without an immediate encoding come
+;; from the constant pool.
+function %f64_const() -> f64 {
+block0:
+    v0 = f64const 0x1.921fb54442d18p1
+    return v0
+}
+
+; VCode:
+; block0:
+;   vldr d0, [pc, VCodeConstant(0)]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d0, [pc]
+;   bx lr
+;   strbpl r2, [r4], #-0xd18
+;   strdmi r2, r3, [sb], -fp
+
+function %f32_const() -> f32 {
+block0:
+    v0 = f32const 0x1.99999ap-4
+    return v0
+}
+
+; VCode:
+; block0:
+;   vldr s0, [pc, VCodeConstant(0)]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr s0, [pc]
+;   bx lr
+;   stcllo p12, c12, [ip, #0x334]
+;   andeq r0, r0, r0
+
+function %v128_const() -> i32x4 {
+block0:
+    v0 = vconst.i32x4 [1 2 3 4]
+    return v0
+}
+
+; VCode:
+; block0:
+;   vldr q8, [pc, VCodeConstant(0):VCodeConstant(1)]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d16, [pc, #8]
+;   vldr d17, [pc, #0xc]
+;   bx lr
+;   andeq r0, r0, r0
+;   andeq r0, r0, r1
+;   andeq r0, r0, r2
+;   andeq r0, r0, r3
+;   andeq r0, r0, r4
+
+function %v128_zero() -> i32x4 {
+block0:
+    v0 = vconst.i32x4 0x00
+    return v0
+}
+
+; VCode:
+; block0:
+;   vmov.i32 q8, #0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.i32 q8, #0
+;   bx lr
+
+function %two_uses(f64) -> f64 {
+block0(v0: f64):
+    v1 = f64const 0x1.5555555555555p-2
+    v2 = fmul v0, v1
+    v3 = fadd v2, v1
+    return v3
+}
+
+; VCode:
+; block0:
+;   vldr d4, [pc, VCodeConstant(0)]
+;   vmul.f64 d5, d0, d4
+;   vadd.f64 d0, d5, d4
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d4, [pc, #8]
+;   vmul.f64 d5, d0, d4
+;   vadd.f64 d0, d5, d4
+;   bx lr
+;   ldrbpl r5, [r5, #-0x555]
+;   svclo #0xd55555
+

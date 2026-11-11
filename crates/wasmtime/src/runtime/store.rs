@@ -2152,7 +2152,6 @@ at https://bytecodealliance.org/security.
                     fn drop(&mut self) {
                         panic!("panicking again to trigger a process abort");
                     }
-
                 }
 
                 let _bomb = PanicAgainOnDrop;

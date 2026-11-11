@@ -644,6 +644,12 @@ information about this check\
             "has_avx512vnni" => "avx512vnni",
             "has_lzcnt" => "lzcnt",
 
+            // arm32 features
+            "has_idiv" => "idiv",
+            "has_vfp4" => "vfp4",
+            "has_neon" => "neon",
+            "has_armv8" => "armv8",
+
             // pulley features
             "big_endian" if cfg!(target_endian = "big") => return Ok(()),
             "big_endian" if cfg!(target_endian = "little") => {

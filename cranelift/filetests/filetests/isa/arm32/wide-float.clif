@@ -1,0 +1,760 @@
+test compile precise-output
+set unwind_info=false
+set opt_level=speed
+target armv7 has_neon has_vfp4
+
+;; With NEON, functions without vector values can also allocate scalar floats
+;; to d16-d31 (the halves of q8-q15). Values accessed as S registers are
+;; limited to d0-d15.
+
+function %f64_pressure(i32) -> f64 {
+block0(v0: i32):
+    v1 = load.f64 aligned v0+0
+    v2 = load.f64 aligned v0+8
+    v3 = load.f64 aligned v0+16
+    v4 = load.f64 aligned v0+24
+    v5 = load.f64 aligned v0+32
+    v6 = load.f64 aligned v0+40
+    v7 = load.f64 aligned v0+48
+    v8 = load.f64 aligned v0+56
+    v9 = load.f64 aligned v0+64
+    v10 = load.f64 aligned v0+72
+    v11 = load.f64 aligned v0+80
+    v12 = load.f64 aligned v0+88
+    v13 = load.f64 aligned v0+96
+    v14 = load.f64 aligned v0+104
+    v15 = load.f64 aligned v0+112
+    v16 = load.f64 aligned v0+120
+    v17 = load.f64 aligned v0+128
+    v18 = load.f64 aligned v0+136
+    v19 = load.f64 aligned v0+144
+    v20 = load.f64 aligned v0+152
+    v100 = fadd v1, v2
+    v101 = fmul v100, v3
+    v102 = fmul v101, v4
+    v103 = fmul v102, v5
+    v104 = fmul v103, v6
+    v105 = fmul v104, v7
+    v106 = fmul v105, v8
+    v107 = fmul v106, v9
+    v108 = fmul v107, v10
+    v109 = fmul v108, v11
+    v110 = fmul v109, v12
+    v111 = fmul v110, v13
+    v112 = fmul v111, v14
+    v113 = fmul v112, v15
+    v114 = fmul v113, v16
+    v115 = fmul v114, v17
+    v116 = fmul v115, v18
+    v117 = fmul v116, v19
+    v118 = fmul v117, v20
+    v119 = fadd v118, v1
+    v120 = fadd v119, v2
+    v121 = fadd v120, v3
+    v122 = fadd v121, v4
+    v123 = fadd v122, v5
+    v124 = fadd v123, v6
+    v125 = fadd v124, v7
+    v126 = fadd v125, v8
+    v127 = fadd v126, v9
+    v128 = fadd v127, v10
+    v129 = fadd v128, v11
+    v130 = fadd v129, v12
+    v131 = fadd v130, v13
+    v132 = fadd v131, v14
+    v133 = fadd v132, v15
+    v134 = fadd v133, v16
+    v135 = fadd v134, v17
+    v136 = fadd v135, v18
+    v137 = fadd v136, v19
+    v138 = fadd v137, v20
+    return v138
+}
+
+; VCode:
+; block0:
+;   vldr d0, [r0]
+;   vldr d1, [r0, #8]
+;   vldr d2, [r0, #16]
+;   vldr d3, [r0, #24]
+;   vldr d4, [r0, #32]
+;   vldr d5, [r0, #40]
+;   vldr d6, [r0, #48]
+;   vldr d7, [r0, #56]
+;   vldr d16, [r0, #64]
+;   vldr d17, [r0, #72]
+;   vldr d18, [r0, #80]
+;   vldr d19, [r0, #88]
+;   vldr d20, [r0, #96]
+;   vldr d21, [r0, #104]
+;   vldr d22, [r0, #112]
+;   vldr d23, [r0, #120]
+;   vldr d24, [r0, #128]
+;   vldr d25, [r0, #136]
+;   vldr d26, [r0, #144]
+;   vldr d27, [r0, #152]
+;   vadd.f64 d28, d0, d1
+;   vmul.f64 d28, d28, d2
+;   vmul.f64 d28, d28, d3
+;   vmul.f64 d28, d28, d4
+;   vmul.f64 d28, d28, d5
+;   vmul.f64 d28, d28, d6
+;   vmul.f64 d28, d28, d7
+;   vmul.f64 d28, d28, d16
+;   vmul.f64 d28, d28, d17
+;   vmul.f64 d28, d28, d18
+;   vmul.f64 d28, d28, d19
+;   vmul.f64 d28, d28, d20
+;   vmul.f64 d28, d28, d21
+;   vmul.f64 d28, d28, d22
+;   vmul.f64 d28, d28, d23
+;   vmul.f64 d28, d28, d24
+;   vmul.f64 d28, d28, d25
+;   vmul.f64 d28, d28, d26
+;   vmul.f64 d28, d28, d27
+;   vadd.f64 d0, d28, d0
+;   vadd.f64 d0, d0, d1
+;   vadd.f64 d0, d0, d2
+;   vadd.f64 d0, d0, d3
+;   vadd.f64 d0, d0, d4
+;   vadd.f64 d0, d0, d5
+;   vadd.f64 d0, d0, d6
+;   vadd.f64 d0, d0, d7
+;   vadd.f64 d0, d0, d16
+;   vadd.f64 d0, d0, d17
+;   vadd.f64 d0, d0, d18
+;   vadd.f64 d0, d0, d19
+;   vadd.f64 d0, d0, d20
+;   vadd.f64 d0, d0, d21
+;   vadd.f64 d0, d0, d22
+;   vadd.f64 d0, d0, d23
+;   vadd.f64 d0, d0, d24
+;   vadd.f64 d0, d0, d25
+;   vadd.f64 d0, d0, d26
+;   vadd.f64 d0, d0, d27
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d0, [r0] ; trap: heap_oob
+;   vldr d1, [r0, #8] ; trap: heap_oob
+;   vldr d2, [r0, #0x10] ; trap: heap_oob
+;   vldr d3, [r0, #0x18] ; trap: heap_oob
+;   vldr d4, [r0, #0x20] ; trap: heap_oob
+;   vldr d5, [r0, #0x28] ; trap: heap_oob
+;   vldr d6, [r0, #0x30] ; trap: heap_oob
+;   vldr d7, [r0, #0x38] ; trap: heap_oob
+;   vldr d16, [r0, #0x40] ; trap: heap_oob
+;   vldr d17, [r0, #0x48] ; trap: heap_oob
+;   vldr d18, [r0, #0x50] ; trap: heap_oob
+;   vldr d19, [r0, #0x58] ; trap: heap_oob
+;   vldr d20, [r0, #0x60] ; trap: heap_oob
+;   vldr d21, [r0, #0x68] ; trap: heap_oob
+;   vldr d22, [r0, #0x70] ; trap: heap_oob
+;   vldr d23, [r0, #0x78] ; trap: heap_oob
+;   vldr d24, [r0, #0x80] ; trap: heap_oob
+;   vldr d25, [r0, #0x88] ; trap: heap_oob
+;   vldr d26, [r0, #0x90] ; trap: heap_oob
+;   vldr d27, [r0, #0x98] ; trap: heap_oob
+;   vadd.f64 d28, d0, d1
+;   vmul.f64 d28, d28, d2
+;   vmul.f64 d28, d28, d3
+;   vmul.f64 d28, d28, d4
+;   vmul.f64 d28, d28, d5
+;   vmul.f64 d28, d28, d6
+;   vmul.f64 d28, d28, d7
+;   vmul.f64 d28, d28, d16
+;   vmul.f64 d28, d28, d17
+;   vmul.f64 d28, d28, d18
+;   vmul.f64 d28, d28, d19
+;   vmul.f64 d28, d28, d20
+;   vmul.f64 d28, d28, d21
+;   vmul.f64 d28, d28, d22
+;   vmul.f64 d28, d28, d23
+;   vmul.f64 d28, d28, d24
+;   vmul.f64 d28, d28, d25
+;   vmul.f64 d28, d28, d26
+;   vmul.f64 d28, d28, d27
+;   vadd.f64 d0, d28, d0
+;   vadd.f64 d0, d0, d1
+;   vadd.f64 d0, d0, d2
+;   vadd.f64 d0, d0, d3
+;   vadd.f64 d0, d0, d4
+;   vadd.f64 d0, d0, d5
+;   vadd.f64 d0, d0, d6
+;   vadd.f64 d0, d0, d7
+;   vadd.f64 d0, d0, d16
+;   vadd.f64 d0, d0, d17
+;   vadd.f64 d0, d0, d18
+;   vadd.f64 d0, d0, d19
+;   vadd.f64 d0, d0, d20
+;   vadd.f64 d0, d0, d21
+;   vadd.f64 d0, d0, d22
+;   vadd.f64 d0, d0, d23
+;   vadd.f64 d0, d0, d24
+;   vadd.f64 d0, d0, d25
+;   vadd.f64 d0, d0, d26
+;   vadd.f64 d0, d0, d27
+;   bx lr
+
+function %mixed_pressure(i32) -> f32 {
+block0(v0: i32):
+    v1 = load.f64 aligned v0+0
+    v2 = load.f64 aligned v0+8
+    v3 = load.f64 aligned v0+16
+    v4 = load.f64 aligned v0+24
+    v5 = load.f64 aligned v0+32
+    v6 = load.f64 aligned v0+40
+    v7 = load.f64 aligned v0+48
+    v8 = load.f64 aligned v0+56
+    v9 = load.f64 aligned v0+64
+    v10 = load.f64 aligned v0+72
+    v11 = load.f64 aligned v0+80
+    v12 = load.f64 aligned v0+88
+    v21 = load.f32 aligned v0+100
+    v22 = load.f32 aligned v0+104
+    v23 = load.f32 aligned v0+108
+    v24 = load.f32 aligned v0+112
+    v25 = load.f32 aligned v0+116
+    v26 = load.f32 aligned v0+120
+    v27 = load.f32 aligned v0+124
+    v28 = load.f32 aligned v0+128
+    v29 = load.f32 aligned v0+132
+    v30 = load.f32 aligned v0+136
+    v31 = load.f32 aligned v0+140
+    v32 = load.f32 aligned v0+144
+    v50 = fadd v1, v2
+    v51 = fmul v50, v3
+    v52 = fmul v51, v4
+    v53 = fmul v52, v5
+    v54 = fmul v53, v6
+    v55 = fmul v54, v7
+    v56 = fmul v55, v8
+    v57 = fmul v56, v9
+    v58 = fmul v57, v10
+    v59 = fmul v58, v11
+    v60 = fmul v59, v12
+    v70 = fdemote.f32 v60
+    v71 = fadd v70, v21
+    v72 = fadd v71, v22
+    v73 = fadd v72, v23
+    v74 = fadd v73, v24
+    v75 = fadd v74, v25
+    v76 = fadd v75, v26
+    v77 = fadd v76, v27
+    v78 = fadd v77, v28
+    v79 = fadd v78, v29
+    v80 = fadd v79, v30
+    v81 = fadd v80, v31
+    v82 = fadd v81, v32
+    v83 = fpromote.f64 v82
+    v84 = fadd v83, v1
+    v85 = fdemote.f32 v84
+    v86 = fpromote.f64 v85
+    v87 = fadd v86, v2
+    v88 = fdemote.f32 v87
+    v89 = fpromote.f64 v88
+    v90 = fadd v89, v3
+    v91 = fdemote.f32 v90
+    v92 = fpromote.f64 v91
+    v93 = fadd v92, v4
+    v94 = fdemote.f32 v93
+    v95 = fpromote.f64 v94
+    v96 = fadd v95, v5
+    v97 = fdemote.f32 v96
+    v98 = fpromote.f64 v97
+    v99 = fadd v98, v6
+    v100 = fdemote.f32 v99
+    v101 = fpromote.f64 v100
+    v102 = fadd v101, v7
+    v103 = fdemote.f32 v102
+    v104 = fpromote.f64 v103
+    v105 = fadd v104, v8
+    v106 = fdemote.f32 v105
+    v107 = fpromote.f64 v106
+    v108 = fadd v107, v9
+    v109 = fdemote.f32 v108
+    v110 = fpromote.f64 v109
+    v111 = fadd v110, v10
+    v112 = fdemote.f32 v111
+    v113 = fpromote.f64 v112
+    v114 = fadd v113, v11
+    v115 = fdemote.f32 v114
+    v116 = fpromote.f64 v115
+    v117 = fadd v116, v12
+    v118 = fdemote.f32 v117
+    v119 = fmul v118, v21
+    return v119
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d15}
+; block0:
+;   vldr d3, [r0]
+;   vldr d2, [r0, #8]
+;   vldr d1, [r0, #16]
+;   vldr d31, [r0, #24]
+;   vldr d30, [r0, #32]
+;   vldr d29, [r0, #40]
+;   vldr d28, [r0, #48]
+;   vldr d27, [r0, #56]
+;   vldr d26, [r0, #64]
+;   vldr d25, [r0, #72]
+;   vldr d24, [r0, #80]
+;   vldr d23, [r0, #88]
+;   vldr s0, [r0, #100]
+;   vldr s8, [r0, #104]
+;   vldr s10, [r0, #108]
+;   vldr s12, [r0, #112]
+;   vldr s14, [r0, #116]
+;   vldr s16, [r0, #120]
+;   vldr s18, [r0, #124]
+;   vldr s20, [r0, #128]
+;   vldr s22, [r0, #132]
+;   vldr s24, [r0, #136]
+;   vldr s26, [r0, #140]
+;   vldr s28, [r0, #144]
+;   vadd.f64 d16, d3, d2
+;   vmul.f64 d16, d16, d1
+;   vmul.f64 d16, d16, d31
+;   vmul.f64 d16, d16, d30
+;   vmul.f64 d16, d16, d29
+;   vmul.f64 d16, d16, d28
+;   vmul.f64 d16, d16, d27
+;   vmul.f64 d16, d16, d26
+;   vmul.f64 d16, d16, d25
+;   vmul.f64 d16, d16, d24
+;   vmul.f64 d16, d16, d23
+;   vcvt.f32.f64 s30, d16
+;   vadd.f32 s30, s30, s0
+;   vadd.f32 s8, s30, s8
+;   vadd.f32 s8, s8, s10
+;   vadd.f32 s8, s8, s12
+;   vadd.f32 s8, s8, s14
+;   vadd.f32 s8, s8, s16
+;   vadd.f32 s8, s8, s18
+;   vadd.f32 s8, s8, s20
+;   vadd.f32 s8, s8, s22
+;   vadd.f32 s8, s8, s24
+;   vadd.f32 s8, s8, s26
+;   vadd.f32 s8, s8, s28
+;   vcvt.f64.f32 d4, s8
+;   vadd.f64 d3, d4, d3
+;   vcvt.f32.f64 s6, d3
+;   vcvt.f64.f32 d3, s6
+;   vadd.f64 d2, d3, d2
+;   vcvt.f32.f64 s4, d2
+;   vcvt.f64.f32 d2, s4
+;   vadd.f64 d1, d2, d1
+;   vcvt.f32.f64 s2, d1
+;   vcvt.f64.f32 d1, s2
+;   vadd.f64 d31, d1, d31
+;   vcvt.f32.f64 s2, d31
+;   vcvt.f64.f32 d31, s2
+;   vadd.f64 d30, d31, d30
+;   vcvt.f32.f64 s2, d30
+;   vcvt.f64.f32 d30, s2
+;   vadd.f64 d29, d30, d29
+;   vcvt.f32.f64 s2, d29
+;   vcvt.f64.f32 d29, s2
+;   vadd.f64 d28, d29, d28
+;   vcvt.f32.f64 s2, d28
+;   vcvt.f64.f32 d28, s2
+;   vadd.f64 d27, d28, d27
+;   vcvt.f32.f64 s2, d27
+;   vcvt.f64.f32 d27, s2
+;   vadd.f64 d26, d27, d26
+;   vcvt.f32.f64 s2, d26
+;   vcvt.f64.f32 d26, s2
+;   vadd.f64 d25, d26, d25
+;   vcvt.f32.f64 s2, d25
+;   vcvt.f64.f32 d25, s2
+;   vadd.f64 d24, d25, d24
+;   vcvt.f32.f64 s2, d24
+;   vcvt.f64.f32 d24, s2
+;   vadd.f64 d23, d24, d23
+;   vcvt.f32.f64 s2, d23
+;   vmul.f32 s0, s2, s0
+;   vpop {d8-d15}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8, d9, d10, d11, d12, d13, d14, d15}
+; block1: ; offset 0xc
+;   vldr d3, [r0] ; trap: heap_oob
+;   vldr d2, [r0, #8] ; trap: heap_oob
+;   vldr d1, [r0, #0x10] ; trap: heap_oob
+;   vldr d31, [r0, #0x18] ; trap: heap_oob
+;   vldr d30, [r0, #0x20] ; trap: heap_oob
+;   vldr d29, [r0, #0x28] ; trap: heap_oob
+;   vldr d28, [r0, #0x30] ; trap: heap_oob
+;   vldr d27, [r0, #0x38] ; trap: heap_oob
+;   vldr d26, [r0, #0x40] ; trap: heap_oob
+;   vldr d25, [r0, #0x48] ; trap: heap_oob
+;   vldr d24, [r0, #0x50] ; trap: heap_oob
+;   vldr d23, [r0, #0x58] ; trap: heap_oob
+;   vldr s0, [r0, #0x64] ; trap: heap_oob
+;   vldr s8, [r0, #0x68] ; trap: heap_oob
+;   vldr s10, [r0, #0x6c] ; trap: heap_oob
+;   vldr s12, [r0, #0x70] ; trap: heap_oob
+;   vldr s14, [r0, #0x74] ; trap: heap_oob
+;   vldr s16, [r0, #0x78] ; trap: heap_oob
+;   vldr s18, [r0, #0x7c] ; trap: heap_oob
+;   vldr s20, [r0, #0x80] ; trap: heap_oob
+;   vldr s22, [r0, #0x84] ; trap: heap_oob
+;   vldr s24, [r0, #0x88] ; trap: heap_oob
+;   vldr s26, [r0, #0x8c] ; trap: heap_oob
+;   vldr s28, [r0, #0x90] ; trap: heap_oob
+;   vadd.f64 d16, d3, d2
+;   vmul.f64 d16, d16, d1
+;   vmul.f64 d16, d16, d31
+;   vmul.f64 d16, d16, d30
+;   vmul.f64 d16, d16, d29
+;   vmul.f64 d16, d16, d28
+;   vmul.f64 d16, d16, d27
+;   vmul.f64 d16, d16, d26
+;   vmul.f64 d16, d16, d25
+;   vmul.f64 d16, d16, d24
+;   vmul.f64 d16, d16, d23
+;   vcvt.f32.f64 s30, d16
+;   vadd.f32 s30, s30, s0
+;   vadd.f32 s8, s30, s8
+;   vadd.f32 s8, s8, s10
+;   vadd.f32 s8, s8, s12
+;   vadd.f32 s8, s8, s14
+;   vadd.f32 s8, s8, s16
+;   vadd.f32 s8, s8, s18
+;   vadd.f32 s8, s8, s20
+;   vadd.f32 s8, s8, s22
+;   vadd.f32 s8, s8, s24
+;   vadd.f32 s8, s8, s26
+;   vadd.f32 s8, s8, s28
+;   vcvt.f64.f32 d4, s8
+;   vadd.f64 d3, d4, d3
+;   vcvt.f32.f64 s6, d3
+;   vcvt.f64.f32 d3, s6
+;   vadd.f64 d2, d3, d2
+;   vcvt.f32.f64 s4, d2
+;   vcvt.f64.f32 d2, s4
+;   vadd.f64 d1, d2, d1
+;   vcvt.f32.f64 s2, d1
+;   vcvt.f64.f32 d1, s2
+;   vadd.f64 d31, d1, d31
+;   vcvt.f32.f64 s2, d31
+;   vcvt.f64.f32 d31, s2
+;   vadd.f64 d30, d31, d30
+;   vcvt.f32.f64 s2, d30
+;   vcvt.f64.f32 d30, s2
+;   vadd.f64 d29, d30, d29
+;   vcvt.f32.f64 s2, d29
+;   vcvt.f64.f32 d29, s2
+;   vadd.f64 d28, d29, d28
+;   vcvt.f32.f64 s2, d28
+;   vcvt.f64.f32 d28, s2
+;   vadd.f64 d27, d28, d27
+;   vcvt.f32.f64 s2, d27
+;   vcvt.f64.f32 d27, s2
+;   vadd.f64 d26, d27, d26
+;   vcvt.f32.f64 s2, d26
+;   vcvt.f64.f32 d26, s2
+;   vadd.f64 d25, d26, d25
+;   vcvt.f32.f64 s2, d25
+;   vcvt.f64.f32 d25, s2
+;   vadd.f64 d24, d25, d24
+;   vcvt.f32.f64 s2, d24
+;   vcvt.f64.f32 d24, s2
+;   vadd.f64 d23, d24, d23
+;   vcvt.f32.f64 s2, d23
+;   vmul.f32 s0, s2, s0
+;   vpop {d8, d9, d10, d11, d12, d13, d14, d15}
+;   pop {fp, pc}
+
+function %across_call(f64, f64) -> f64 {
+    fn0 = %g()
+
+block0(v0: f64, v1: f64):
+    v2 = fadd v0, v1
+    v3 = fmul v0, v1
+    call fn0()
+    v4 = fsub v2, v3
+    return v4
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d9}
+; block0:
+;   vmov.f64 d8, d1
+;   vmov.f64 d9, d0
+;   ldr r0, =%g+0
+;   blx r0
+;   vmov.f64 d0, d9
+;   vmov.f64 d1, d8
+;   vadd.f64 d7, d0, d1
+;   vmul.f64 d16, d0, d1
+;   vsub.f64 d0, d7, d16
+;   vpop {d8-d9}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8, d9}
+; block1: ; offset 0xc
+;   vmov.f64 d8, d1
+;   vmov.f64 d9, d0
+;   ldr r0, [pc]
+;   b #0x20
+;   andeq r0, r0, r0 ; reloc_external Abs4 %g 0
+;   blx r0
+;   vmov.f64 d0, d9
+;   vmov.f64 d1, d8
+;   vadd.f64 d7, d0, d1
+;   vmul.f64 d16, d0, d1
+;   vsub.f64 d0, d7, d16
+;   vpop {d8, d9}
+;   pop {fp, pc}
+
+;; Vector values use q8-q15, so d16-d31 are not used for scalars here.
+function %with_vector(f64x2, f64) -> f64x2 {
+block0(v0: f64x2, v1: f64):
+    v2 = splat.f64x2 v1
+    v3 = fadd v0, v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   vmov r1, r0, d0
+;   vmov q9, r1, r0, r1, r0
+;   vadd.f64x q8, q8, q9
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov r1, r0, d0
+;   vmov d18, r1, r0
+;   vmov d19, r1, r0
+;   vadd.f64 d16, d16, d18
+;   vadd.f64 d17, d17, d19
+;   bx lr
+
+
+;; preserve_all saves the d16-d31 it uses.
+function %pa(i32) preserve_all {
+block0(v0: i32):
+    v1 = load.f64 aligned v0+0
+    v2 = load.f64 aligned v0+8
+    v3 = load.f64 aligned v0+16
+    v4 = load.f64 aligned v0+24
+    v5 = load.f64 aligned v0+32
+    v6 = load.f64 aligned v0+40
+    v7 = load.f64 aligned v0+48
+    v8 = load.f64 aligned v0+56
+    v9 = load.f64 aligned v0+64
+    v10 = load.f64 aligned v0+72
+    v11 = load.f64 aligned v0+80
+    v12 = load.f64 aligned v0+88
+    v13 = load.f64 aligned v0+96
+    v14 = load.f64 aligned v0+104
+    v15 = load.f64 aligned v0+112
+    v16 = load.f64 aligned v0+120
+    v17 = load.f64 aligned v0+128
+    v18 = load.f64 aligned v0+136
+    v19 = load.f64 aligned v0+144
+    v20 = load.f64 aligned v0+152
+    v100 = fadd v1, v2
+    v101 = fmul v100, v3
+    v102 = fmul v101, v4
+    v103 = fmul v102, v5
+    v104 = fmul v103, v6
+    v105 = fmul v104, v7
+    v106 = fmul v105, v8
+    v107 = fmul v106, v9
+    v108 = fmul v107, v10
+    v109 = fmul v108, v11
+    v110 = fmul v109, v12
+    v111 = fmul v110, v13
+    v112 = fmul v111, v14
+    v113 = fmul v112, v15
+    v114 = fmul v113, v16
+    v115 = fmul v114, v17
+    v116 = fmul v115, v18
+    v117 = fmul v116, v19
+    v118 = fmul v117, v20
+    v119 = fadd v118, v1
+    v120 = fadd v119, v2
+    v121 = fadd v120, v3
+    v122 = fadd v121, v4
+    v123 = fadd v122, v5
+    v124 = fadd v123, v6
+    v125 = fadd v124, v7
+    v126 = fadd v125, v8
+    v127 = fadd v126, v9
+    v128 = fadd v127, v10
+    v129 = fadd v128, v11
+    v130 = fadd v129, v12
+    v131 = fadd v130, v13
+    v132 = fadd v131, v14
+    v133 = fadd v132, v15
+    v134 = fadd v133, v16
+    v135 = fadd v134, v17
+    v136 = fadd v135, v18
+    v137 = fadd v136, v19
+    v138 = fadd v137, v20
+    store.f64 v138, v0
+    return
+}
+
+; VCode:
+;   push {r0, r1, r2, fp, lr}
+;   add fp, sp, #12
+;   vpush {d0-d7}
+;   vpush {d16-d28}
+; block0:
+;   vldr d0, [r0]
+;   vldr d1, [r0, #8]
+;   vldr d2, [r0, #16]
+;   vldr d3, [r0, #24]
+;   vldr d4, [r0, #32]
+;   vldr d5, [r0, #40]
+;   vldr d6, [r0, #48]
+;   vldr d7, [r0, #56]
+;   vldr d16, [r0, #64]
+;   vldr d17, [r0, #72]
+;   vldr d18, [r0, #80]
+;   vldr d19, [r0, #88]
+;   vldr d20, [r0, #96]
+;   vldr d21, [r0, #104]
+;   vldr d22, [r0, #112]
+;   vldr d23, [r0, #120]
+;   vldr d24, [r0, #128]
+;   vldr d25, [r0, #136]
+;   vldr d26, [r0, #144]
+;   vldr d27, [r0, #152]
+;   vadd.f64 d28, d0, d1
+;   vmul.f64 d28, d28, d2
+;   vmul.f64 d28, d28, d3
+;   vmul.f64 d28, d28, d4
+;   vmul.f64 d28, d28, d5
+;   vmul.f64 d28, d28, d6
+;   vmul.f64 d28, d28, d7
+;   vmul.f64 d28, d28, d16
+;   vmul.f64 d28, d28, d17
+;   vmul.f64 d28, d28, d18
+;   vmul.f64 d28, d28, d19
+;   vmul.f64 d28, d28, d20
+;   vmul.f64 d28, d28, d21
+;   vmul.f64 d28, d28, d22
+;   vmul.f64 d28, d28, d23
+;   vmul.f64 d28, d28, d24
+;   vmul.f64 d28, d28, d25
+;   vmul.f64 d28, d28, d26
+;   vmul.f64 d28, d28, d27
+;   vadd.f64 d0, d28, d0
+;   vadd.f64 d0, d0, d1
+;   vadd.f64 d0, d0, d2
+;   vadd.f64 d0, d0, d3
+;   vadd.f64 d0, d0, d4
+;   vadd.f64 d0, d0, d5
+;   vadd.f64 d0, d0, d6
+;   vadd.f64 d0, d0, d7
+;   vadd.f64 d0, d0, d16
+;   vadd.f64 d0, d0, d17
+;   vadd.f64 d0, d0, d18
+;   vadd.f64 d0, d0, d19
+;   vadd.f64 d0, d0, d20
+;   vadd.f64 d0, d0, d21
+;   vadd.f64 d0, d0, d22
+;   vadd.f64 d0, d0, d23
+;   vadd.f64 d0, d0, d24
+;   vadd.f64 d0, d0, d25
+;   vadd.f64 d0, d0, d26
+;   vadd.f64 d0, d0, d27
+;   vmov r1, r2, d0
+;   str r2, [r0, #4]
+;   str r1, [r0]
+;   vpop {d16-d28}
+;   vpop {d0-d7}
+;   pop {r0, r1, r2, fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {r0, r1, r2, fp, lr}
+;   add fp, sp, #0xc
+;   vpush {d0, d1, d2, d3, d4, d5, d6, d7}
+;   vpush {d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27, d28}
+; block1: ; offset 0x10
+;   vldr d0, [r0] ; trap: heap_oob
+;   vldr d1, [r0, #8] ; trap: heap_oob
+;   vldr d2, [r0, #0x10] ; trap: heap_oob
+;   vldr d3, [r0, #0x18] ; trap: heap_oob
+;   vldr d4, [r0, #0x20] ; trap: heap_oob
+;   vldr d5, [r0, #0x28] ; trap: heap_oob
+;   vldr d6, [r0, #0x30] ; trap: heap_oob
+;   vldr d7, [r0, #0x38] ; trap: heap_oob
+;   vldr d16, [r0, #0x40] ; trap: heap_oob
+;   vldr d17, [r0, #0x48] ; trap: heap_oob
+;   vldr d18, [r0, #0x50] ; trap: heap_oob
+;   vldr d19, [r0, #0x58] ; trap: heap_oob
+;   vldr d20, [r0, #0x60] ; trap: heap_oob
+;   vldr d21, [r0, #0x68] ; trap: heap_oob
+;   vldr d22, [r0, #0x70] ; trap: heap_oob
+;   vldr d23, [r0, #0x78] ; trap: heap_oob
+;   vldr d24, [r0, #0x80] ; trap: heap_oob
+;   vldr d25, [r0, #0x88] ; trap: heap_oob
+;   vldr d26, [r0, #0x90] ; trap: heap_oob
+;   vldr d27, [r0, #0x98] ; trap: heap_oob
+;   vadd.f64 d28, d0, d1
+;   vmul.f64 d28, d28, d2
+;   vmul.f64 d28, d28, d3
+;   vmul.f64 d28, d28, d4
+;   vmul.f64 d28, d28, d5
+;   vmul.f64 d28, d28, d6
+;   vmul.f64 d28, d28, d7
+;   vmul.f64 d28, d28, d16
+;   vmul.f64 d28, d28, d17
+;   vmul.f64 d28, d28, d18
+;   vmul.f64 d28, d28, d19
+;   vmul.f64 d28, d28, d20
+;   vmul.f64 d28, d28, d21
+;   vmul.f64 d28, d28, d22
+;   vmul.f64 d28, d28, d23
+;   vmul.f64 d28, d28, d24
+;   vmul.f64 d28, d28, d25
+;   vmul.f64 d28, d28, d26
+;   vmul.f64 d28, d28, d27
+;   vadd.f64 d0, d28, d0
+;   vadd.f64 d0, d0, d1
+;   vadd.f64 d0, d0, d2
+;   vadd.f64 d0, d0, d3
+;   vadd.f64 d0, d0, d4
+;   vadd.f64 d0, d0, d5
+;   vadd.f64 d0, d0, d6
+;   vadd.f64 d0, d0, d7
+;   vadd.f64 d0, d0, d16
+;   vadd.f64 d0, d0, d17
+;   vadd.f64 d0, d0, d18
+;   vadd.f64 d0, d0, d19
+;   vadd.f64 d0, d0, d20
+;   vadd.f64 d0, d0, d21
+;   vadd.f64 d0, d0, d22
+;   vadd.f64 d0, d0, d23
+;   vadd.f64 d0, d0, d24
+;   vadd.f64 d0, d0, d25
+;   vadd.f64 d0, d0, d26
+;   vadd.f64 d0, d0, d27
+;   vmov r1, r2, d0
+;   str r2, [r0, #4] ; trap: heap_oob
+;   str r1, [r0] ; trap: heap_oob
+;   vpop {d16, d17, d18, d19, d20, d21, d22, d23, d24, d25, d26, d27, d28}
+;   vpop {d0, d1, d2, d3, d4, d5, d6, d7}
+;   pop {r0, r1, r2, fp, pc}
+

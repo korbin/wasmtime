@@ -1,4 +1,4 @@
-use libc::{EINVAL, EPERM, syscall};
+use libc::{EINVAL, ENOSYS, EPERM, syscall};
 use std::io::{self, Error};
 use wasmtime_core::error::Result;
 
@@ -55,6 +55,10 @@ pub(crate) fn pipeline_flush_mt() -> Result<()> {
         Err(e) if e.raw_os_error().unwrap() == EINVAL => {
             membarrier(MEMBARRIER_CMD_GLOBAL)?;
         }
+
+        // 32-bit ARM devices may run kernels older than 4.3, which have no
+        // membarrier at all; do without it there, as before it was used.
+        Err(e) if cfg!(target_arch = "arm") && e.raw_os_error().unwrap() == ENOSYS => {}
 
         // In any other case we got an actual error, so lets propagate that up
         e => e?,

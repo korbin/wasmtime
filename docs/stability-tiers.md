@@ -182,7 +182,6 @@ features to figure out how best to implement them and at least move them to Tier
 * Target: [AArch64 FreeBSD](https://github.com/bytecodealliance/wasmtime/issues/5499)
 * Target: [NetBSD/OpenBSD](https://github.com/bytecodealliance/wasmtime/issues/6962)
 * Cranelift Target: [i686 (32-bit Intel targets)](https://github.com/bytecodealliance/wasmtime/issues/1980)
-* Cranelift Target: ARM 32-bit
 * Cranelift Target: MIPS
 * Cranelift Target: SPARC
 * Cranelift Target: PowerPC
@@ -319,6 +318,32 @@ by default and therefore supported as tier 1.  The legend here is:
 | [`exception-handling`]                  | ✅        | ❌     |
 | [`stack-switching`]                     | ❌        | ❌     |
 
+##### arm (32-bit, ARMv7-A)
+
+| Feature                                 | Cranelift | Winch  |
+|-----------------------------------------|-----------|--------|
+| [`mutable-globals`]                     | ✅        | ❌     |
+| [`sign-extension-ops`]                  | ✅        | ❌     |
+| [`nontrapping-float-to-int-conversion`] | ✅        | ❌     |
+| [`multi-value`]                         | ✅        | ❌     |
+| [`bulk-memory`]                         | ✅        | ❌     |
+| [`reference-types`]                     | ✅        | ❌[^a] |
+| [`simd`]                                | ✅[^e]    | ❌     |
+| [`component-model`]                     | ✅        | ❌     |
+| [`component-model-async`]               | ✅        | ❌     |
+| [`relaxed-simd`]                        | ✅[^e]    | ❌     |
+| [`multi-memory`]                        | ✅        | ❌     |
+| [`threads`]                             | ✅        | ❌     |
+| [`tail-call`]                           | ✅        | ❌     |
+| [`extended-const`]                      | ✅        | ❌     |
+| [`memory64`]                            | ✅        | ❌     |
+| [`function-references`]                 | ✅        | ❌     |
+| [`gc`]                                  | ✅        | ❌     |
+| [`wide-arithmetic`]                     | ✅        | ❌     |
+| [`custom-page-sizes`]                   | ✅        | ❌     |
+| [`exception-handling`]                  | ✅        | ❌     |
+| [`stack-switching`]                     | ❌        | ❌     |
+
 ##### Pulley
 
 Note that the pulley "architecture" is a stand-in for Wasmtime's baseline
@@ -359,6 +384,10 @@ emitting Pulley bytecode.
   safe way to implement this with Rust's memory model.
 [^c]: Winch's support for aarch64 is complete for Core Wasm.
 [^d]: On riscv64 requires the V extension (the `has_v` Cranelift setting). The
+  proposals are enabled by default, so without it they must be disabled
+  explicitly or creating an engine fails.
+[^e]: On 32-bit ARM requires the Advanced SIMD (NEON) extension (the
+  `has_neon` Cranelift setting, detected automatically on Linux hosts). The
   proposals are enabled by default, so without it they must be disabled
   explicitly or creating an engine fails.
 

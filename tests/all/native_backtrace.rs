@@ -12,6 +12,12 @@ fn check_stack(wat: &str, expected: &[&str], value: i32) -> Result<()> {
     if engine.is_pulley() {
         return Ok(());
     }
+    // The system unwinder on 32-bit ARM uses ARM EHABI unwind tables, which
+    // have no interface for registering tables of JIT code at runtime, so
+    // the native unwinder can't walk through Wasm frames there.
+    if cfg!(target_arch = "arm") {
+        return Ok(());
+    }
     let module = Module::new(&engine, wat)?;
     let start = module.text().as_ptr() as usize;
     let functions = module

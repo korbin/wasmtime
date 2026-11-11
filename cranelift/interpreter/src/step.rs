@@ -424,7 +424,12 @@ where
         }
         Opcode::CallIndirect | Opcode::ReturnCallIndirect => {
             let args = args();
-            let addr_dv = DataValue::I64(arg(0).into_int_unsigned()? as i64);
+            // Keep the width of the address: 32-bit addresses encode their
+            // region in different bits than 64-bit ones.
+            let addr_dv = match arg(0) {
+                DataValue::I32(v) => DataValue::I32(v),
+                v => DataValue::I64(v.into_int_unsigned()? as i64),
+            };
             let addr = Address::try_from(addr_dv.clone()).map_err(StepError::MemoryError)?;
 
             let func = state
@@ -484,8 +489,16 @@ where
                 Opcode::Sload8 => (types::I8, Some(ValueConversionKind::SignExtend(ctrl_ty))),
                 Opcode::Uload16 => (types::I16, Some(ValueConversionKind::ZeroExtend(ctrl_ty))),
                 Opcode::Sload16 => (types::I16, Some(ValueConversionKind::SignExtend(ctrl_ty))),
-                Opcode::Uload32 => (types::I32, Some(ValueConversionKind::ZeroExtend(ctrl_ty))),
-                Opcode::Sload32 => (types::I32, Some(ValueConversionKind::SignExtend(ctrl_ty))),
+                // These always produce an `i64`; their controlling type is
+                // that of the address, which may be `i32`.
+                Opcode::Uload32 => (
+                    types::I32,
+                    Some(ValueConversionKind::ZeroExtend(types::I64)),
+                ),
+                Opcode::Sload32 => (
+                    types::I32,
+                    Some(ValueConversionKind::SignExtend(types::I64)),
+                ),
                 Opcode::Uload8x8
                 | Opcode::Sload8x8
                 | Opcode::Uload16x4

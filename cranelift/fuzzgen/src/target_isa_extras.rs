@@ -15,6 +15,13 @@ impl TargetIsaExtras for &dyn TargetIsa {
                 .find(|f| f.name == "has_v")
                 .and_then(|f| f.as_bool())
                 .unwrap_or(false),
+            // 32-bit ARM only supports SIMD with NEON.
+            Architecture::Arm(_) => self
+                .isa_flags()
+                .iter()
+                .find(|f| f.name == "has_neon")
+                .and_then(|f| f.as_bool())
+                .unwrap_or(false),
             _ => true,
         }
     }

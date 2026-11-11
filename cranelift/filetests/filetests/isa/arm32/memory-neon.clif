@@ -1,0 +1,163 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_neon
+
+;; With NEON, possibly-unaligned float loads use `vld1`, which has no
+;; alignment requirement.
+function %load_f64(i32) -> f64 {
+block0(v0: i32):
+    v1 = load.f64 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vld1.8 {d0}, [r0]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vld1.8 {d0}, [r0] ; trap: heap_oob
+;   bx lr
+
+function %load_f64_offset(i32) -> f64 {
+block0(v0: i32):
+    v1 = load.f64 v0+8
+    return v1
+}
+
+; VCode:
+; block0:
+;   vld1.8 {d0}, [r0, #8]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   add ip, r0, #8
+;   vld1.8 {d0}, [ip] ; trap: heap_oob
+;   bx lr
+
+function %load_f32(i32) -> f32 {
+block0(v0: i32):
+    v1 = load.f32 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vld1.32 {d0[0]}, [r0]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vld1.32 {d0[0]}, [r0] ; trap: heap_oob
+;   bx lr
+
+function %store_f32(i32, f32) {
+block0(v0: i32, v1: f32):
+    store.f32 v1, v0
+    return
+}
+
+; VCode:
+; block0:
+;   vst1.32 {d0[0]}, [r0]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vst1.32 {d0[0]}, [r0] ; trap: heap_oob
+;   bx lr
+
+;; f64 stores stay split (high word first), so that a trapping store has no
+;; effect.
+function %store_f64(i32, f64) {
+block0(v0: i32, v1: f64):
+    store.f64 v1, v0
+    return
+}
+
+; VCode:
+; block0:
+;   vmov r3, r1, d0
+;   str r1, [r0, #4]
+;   str r3, [r0]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov r3, r1, d0
+;   str r1, [r0, #4] ; trap: heap_oob
+;   str r3, [r0] ; trap: heap_oob
+;   bx lr
+
+;; Aligned accesses still use `vldr` with an offset.
+function %load_f64_aligned(i32) -> f64 {
+block0(v0: i32):
+    v1 = load.f64 aligned v0+16
+    return v1
+}
+
+; VCode:
+; block0:
+;   vldr d0, [r0, #16]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d0, [r0, #0x10] ; trap: heap_oob
+;   bx lr
+
+
+;; With NEON, floating-point zero is a single `vmov.i32`.
+function %f64_zero() -> f64 {
+block0:
+    v0 = f64const 0.0
+    return v0
+}
+
+; VCode:
+; block0:
+;   vmov.i32 d0, #0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.i32 d0, #0
+;   bx lr
+
+function %f32_zero() -> f32 {
+block0:
+    v0 = f32const 0.0
+    return v0
+}
+
+; VCode:
+; block0:
+;   vmov.i32 d0, #0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.i32 d0, #0
+;   bx lr
+
+;; Negative zero is not all-zero bits.
+function %f64_neg_zero() -> f64 {
+block0:
+    v0 = f64const -0.0
+    return v0
+}
+
+; VCode:
+; block0:
+;   vldr d0, [pc, VCodeConstant(0)]
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vldr d0, [pc]
+;   bx lr
+;   andeq r0, r0, r0
+;   andhi r0, r0, r0
+

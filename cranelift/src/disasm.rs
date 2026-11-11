@@ -40,7 +40,9 @@ cfg_select! {
         pub fn print_disassembly(func: &Function, isa: &dyn TargetIsa, mem: &[u8]) -> Result<()> {
             #[cfg(feature = "pulley")]
             let is_pulley = match isa.triple().architecture {
-                target_lexicon::Architecture::Pulley32 | target_lexicon::Architecture::Pulley64 => true,
+                target_lexicon::Architecture::Pulley32 | target_lexicon::Architecture::Pulley64 => {
+                    true
+                }
                 _ => false,
             };
             println!("\nDisassembly of {} bytes <{}>:", mem.len(), func.name);

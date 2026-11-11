@@ -64,3 +64,24 @@ block0(v0: f32, v1: f64, v2: i32, v3: i32, v4: f64):
 
 ; run: %fuzzer_case_1(0.0, 0.0, 0, 0, 0.0) == [0, 0, 0xabab_5fd0_0452_0399]
 
+
+;; LLVM's wasm lowering of `u32::swap_bytes`, which the mid-end rewrites to
+;; `bswap`.
+function %bswap_i32_rotr_idiom(i32) -> i32 {
+block0(v0: i32):
+    v1 = iconst.i32 16
+    v2 = rotr v0, v1
+    v3 = bxor v0, v2
+    v4 = iconst.i32 0xff00ff00
+    v5 = band v3, v4
+    v6 = iconst.i32 8
+    v7 = ushr v5, v6
+    v8 = rotr v0, v6
+    v9 = bxor v7, v8
+    return v9
+}
+; run: %bswap_i32_rotr_idiom(0) == 0
+; run: %bswap_i32_rotr_idiom(0x12345678) == 0x78563412
+; run: %bswap_i32_rotr_idiom(0xFFFF0000) == 0x0000FFFF
+; run: %bswap_i32_rotr_idiom(0x80000001) == 0x01000080
+; run: %bswap_i32_rotr_idiom(0xA1B2C3D4) == 0xD4C3B2A1

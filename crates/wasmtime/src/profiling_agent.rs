@@ -34,11 +34,7 @@ cfg_select! {
     all(
         feature = "profiling",
         target_arch = "x86_64",
-        any(
-            target_os = "windows",
-            target_os = "macos",
-            target_os = "linux",
-        ),
+        any(target_os = "windows", target_os = "macos", target_os = "linux",),
     ) => {
         mod vtune;
         pub use vtune::new as new_vtune;

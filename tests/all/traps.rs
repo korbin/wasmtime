@@ -1318,6 +1318,12 @@ fn host_return_error_no_backtrace() -> Result<()> {
 
 #[test]
 fn wasm_fault_address_reported_by_default() -> Result<()> {
+    // 32-bit hosts reserve little virtual memory for linear memories, so
+    // accesses far out of bounds, like the one below, are caught by explicit
+    // bounds checks which don't report a fault address.
+    if cfg!(target_pointer_width = "32") {
+        return Ok(());
+    }
     let mut config = Config::new();
     config.signals_based_traps(true);
     let engine = Engine::new(&config)?;

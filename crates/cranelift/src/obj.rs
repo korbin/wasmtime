@@ -521,6 +521,11 @@ impl<'a> UnwindInfoBuilder<'a> {
         };
         let mut table = FrameTable::default();
         cie.fde_address_encoding = gimli::constants::DW_EH_PE_pcrel;
+        let address_size = compiler
+            .triple()
+            .pointer_width()
+            .map(|w| w.bytes())
+            .unwrap_or(8);
         let cie_id = table.add_cie(cie);
 
         for (text_section_off, unwind_info) in self.systemv_unwind_info.iter() {
@@ -529,8 +534,13 @@ impl<'a> UnwindInfoBuilder<'a> {
             // Note that gimli wants an unsigned 64-bit integer here, but
             // unwinders just use this constant for a relative addition with the
             // address of the FDE, which means that the sign doesn't actually
-            // matter.
-            let fde = unwind_info.to_fde(Address::Constant(actual_offset.cast_unsigned()));
+            // matter. It does need to fit within the target's address size,
+            // though.
+            let mut constant = actual_offset.cast_unsigned();
+            if address_size < 8 {
+                constant &= (1u64 << (8 * u32::from(address_size))) - 1;
+            }
+            let fde = unwind_info.to_fde(Address::Constant(constant));
             table.add_fde(cie_id, fde);
         }
         let endian = match compiler.triple().endianness().unwrap() {

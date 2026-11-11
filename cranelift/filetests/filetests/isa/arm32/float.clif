@@ -1,0 +1,301 @@
+test compile precise-output
+set unwind_info=false
+target armv7 has_vfp4
+
+function %fadd_f32(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fadd v0, v1
+    return v2
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d8}
+; block0:
+;   vadd.f32 s0, s0, s16
+;   vpop {d8-d8}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8}
+; block1: ; offset 0xc
+;   vmov.f32 s16, s1
+;   vadd.f32 s0, s0, s16
+;   vpop {d8}
+;   pop {fp, pc}
+
+function %fmul_f64(f64, f64) -> f64 {
+block0(v0: f64, v1: f64):
+    v2 = fmul v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   vmul.f64 d0, d0, d1
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmul.f64 d0, d0, d1
+;   bx lr
+
+function %fma_f64(f64, f64, f64) -> f64 {
+block0(v0: f64, v1: f64, v2: f64):
+    v3 = fma v0, v1, v2
+    return v3
+}
+
+; VCode:
+; block0:
+;   vmov.f64 d5, d0
+;   vmov.f64 d0, d2
+;   vfma.f64 d0, d5, d1 ; ra=d0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.f64 d5, d0
+;   vmov.f64 d0, d2
+;   vfma.f64 d0, d5, d1
+;   bx lr
+
+function %fmin_f32(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fmin v0, v1
+    return v2
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d8}
+; block0:
+;   vmov.f64 d5, d0
+;   vmin.f32 s0, s10, s16, tmp=r0
+;   vpop {d8-d8}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8}
+; block1: ; offset 0xc
+;   vmov.f32 s16, s1
+;   vmov.f64 d5, d0
+;   vcmp.f32 s10, s16
+;   vmrs apsr_nzcv, fpscr
+;   vmov.f64 d0, d5
+;   vmovgt.f64 d0, d8
+;   vaddvs.f32 s0, s10, s16
+;   vmoveq r0, s10
+;   vmoveq ip, s16
+;   orreq r0, r0, ip
+;   vmoveq s0, r0
+;   vpop {d8}
+;   pop {fp, pc}
+
+function %floor_f64(f64) -> f64 {
+block0(v0: f64):
+    v1 = floor v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vmov.f64 d6, d0
+;   vround_Floor.f64 d0, d6, tmps=r3, r0, d5
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.f64 d6, d0
+;   vabs.f64 d5, d6
+;   mov r3, #0
+;   movw r0, #0
+;   movt r0, #0x4330
+;   vmov d0, r3, r0
+;   vcmp.f64 d5, d0
+;   vmrs apsr_nzcv, fpscr
+;   bpl #0x68
+;   vmov.32 r0, d6[1]
+;   tst r0, #0x80000000
+;   vnegne.f64 d0, d0
+;   vmrs r3, fpscr
+;   bic ip, r3, #0xc00000
+;   orr ip, ip, #0x800000
+;   vmsr fpscr, ip
+;   vadd.f64 d5, d6, d0
+;   vsub.f64 d5, d5, d0
+;   vmsr fpscr, r3
+;   vmov.32 r3, d5[1]
+;   bic r3, r3, #0x80000000
+;   and ip, r0, #0x80000000
+;   orr r3, r3, ip
+;   vmov.f64 d0, d5
+;   vmov.32 d0[1], r3
+;   b #0x70
+;   vmov.f64 d0, d6
+;   vaddvs.f64 d0, d6, d6
+;   bx lr
+
+function %fcmp_one_f64(f64, f64) -> i8 {
+block0(v0: f64, v1: f64):
+    v2 = fcmp one v0, v1
+    return v2
+}
+
+; VCode:
+; block0:
+;   mov r1, #1
+;   vcmp.f64 d0, d1 ; vmrs APSR_nzcv, fpscr
+;   cset r0, mi
+;   csel r0, r1, r0, gt
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   mov r1, #1
+;   vcmp.f64 d0, d1
+;   vmrs apsr_nzcv, fpscr
+;   mov r0, #0
+;   movmi r0, #1
+;   movgt r0, r1
+;   bx lr
+
+function %f64const() -> f64 {
+block0:
+    v0 = f64const 0x1.5p3
+    return v0
+}
+
+; VCode:
+; block0:
+;   vmov.f64 d0, #10.5
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov.f64 d0, #1.050000e+01
+;   bx lr
+
+function %fcvt_to_sint_i32(f64) -> i32 {
+block0(v0: f64):
+    v1 = fcvt_to_sint.i32 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vcmp.f64 d0, d0 ; vmrs APSR_nzcv, fpscr
+;   udfvs ; trap=bad_toint
+;   vldr d4, [pc, VCodeConstant(0)]
+;   vldr d6, [pc, VCodeConstant(1)]
+;   vcmp.f64 d0, d4 ; vmrs APSR_nzcv, fpscr
+;   udfls ; trap=int_ovf
+;   vcmp.f64 d0, d6 ; vmrs APSR_nzcv, fpscr
+;   udfge ; trap=int_ovf
+;   vcvt.s32.f64 s0, d0
+;   vmov r0, s0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vcmp.f64 d0, d0
+;   vmrs apsr_nzcv, fpscr
+;   bvs #0x38
+;   vldr d4, [pc, #0x34]
+;   vldr d6, [pc, #0x38]
+;   vcmp.f64 d0, d4
+;   vmrs apsr_nzcv, fpscr
+;   bls #0x3c
+;   vcmp.f64 d0, d6
+;   vmrs apsr_nzcv, fpscr
+;   bge #0x40
+;   vcvt.s32.f64 s0, d0
+;   vmov r0, s0
+;   bx lr
+;   udf #0 ; trap: bad_toint
+;   udf #0 ; trap: int_ovf
+;   udf #0 ; trap: int_ovf
+;   andeq r0, r0, r0
+;   eoreq r0, r0, r0
+;   mvngt r0, r0
+;   andeq r0, r0, r0
+;   mvnmi r0, r0
+
+function %fcvt_from_uint_i64(i64) -> f64 {
+block0(v0: i64):
+    v1 = fcvt_from_uint.f64 v0
+    return v1
+}
+
+; VCode:
+; block0:
+;   vmov s6, r1
+;   vcvt.f64.u32 d5, s6
+;   vmov s14, r0
+;   vcvt.f64.u32 d0, s14
+;   mov r0, #0
+;   movw r1, #0
+;   movt r1, #16880
+;   vmov d1, r0, r1
+;   vmul.f64 d1, d5, d1
+;   vadd.f64 d0, d1, d0
+;   bx lr
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   vmov s6, r1
+;   vcvt.f64.u32 d5, s6
+;   vmov s14, r0
+;   vcvt.f64.u32 d0, s14
+;   mov r0, #0
+;   movw r1, #0
+;   movt r1, #0x41f0
+;   vmov d1, r0, r1
+;   vmul.f64 d1, d5, d1
+;   vadd.f64 d0, d1, d0
+;   bx lr
+
+function %fcopysign_f32(f32, f32) -> f32 {
+block0(v0: f32, v1: f32):
+    v2 = fcopysign v0, v1
+    return v2
+}
+
+; VCode:
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8-d8}
+; block0:
+;   vmov r3, s0
+;   vmov r1, s16
+;   bic r0, r3, #2147483648
+;   and r1, r1, #2147483648
+;   orr r0, r0, r1
+;   vmov s0, r0
+;   vpop {d8-d8}
+;   pop {fp, pc}
+;
+; Disassembled:
+; block0: ; offset 0x0
+;   push {fp, lr}
+;   mov fp, sp
+;   vpush {d8}
+; block1: ; offset 0xc
+;   vmov.f32 s16, s1
+;   vmov r3, s0
+;   vmov r1, s16
+;   bic r0, r3, #0x80000000
+;   and r1, r1, #0x80000000
+;   orr r0, r0, r1
+;   vmov s0, r0
+;   vpop {d8}
+;   pop {fp, pc}
+

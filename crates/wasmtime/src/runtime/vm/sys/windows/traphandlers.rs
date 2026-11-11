@@ -4,7 +4,7 @@ pub fn lazy_per_thread_init() {
 
 cfg_select! {
     has_native_signals => {
-        pub use super::vectored_exceptions::{TrapHandler, SignalHandler };
+        pub use super::vectored_exceptions::{SignalHandler, TrapHandler};
     }
     _ => {
         pub enum SignalHandler {}
